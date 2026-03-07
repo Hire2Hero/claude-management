@@ -13,7 +13,7 @@ import webbrowser
 from tkinter import ttk, messagebox, filedialog
 from typing import Optional
 
-from config import Config
+from config import Config, SkillsConfig, WorkflowConfig
 
 log = logging.getLogger("claude_mgmt")
 
@@ -42,6 +42,23 @@ class SetupWizard(tk.Toplevel):
             base_dir=bootstrap.base_dir,
             claude_projects_dir=bootstrap.claude_projects_dir,
             claude_oauth_token=bootstrap.claude_oauth_token,
+            skills=SkillsConfig(
+                work_ticket=WorkflowConfig(
+                    commands=list(bootstrap.skills.work_ticket.commands),
+                    review_between=bootstrap.skills.work_ticket.review_between,
+                    builtin=bootstrap.skills.work_ticket.builtin,
+                ),
+                review_pr=WorkflowConfig(
+                    commands=list(bootstrap.skills.review_pr.commands),
+                    review_between=bootstrap.skills.review_pr.review_between,
+                    builtin=bootstrap.skills.review_pr.builtin,
+                ),
+                fix_pr=WorkflowConfig(
+                    commands=list(bootstrap.skills.fix_pr.commands),
+                    review_between=bootstrap.skills.fix_pr.review_between,
+                    builtin=bootstrap.skills.fix_pr.builtin,
+                ),
+            ),
         )
         self._bg_queue: queue.Queue = queue.Queue()
         self._step = 0
@@ -84,6 +101,7 @@ class SetupWizard(tk.Toplevel):
             self._build_step_claude_auth,
             self._build_step_base_dir,
             self._build_step_org_repos,
+            self._build_step_skills,
             self._build_step_jira,
             self._build_step_slack,
         ]
@@ -158,6 +176,8 @@ class SetupWizard(tk.Toplevel):
                 return False
             self._config.repos = selected
         elif self._step == 3:
+            self._save_skills_from_ui()
+        elif self._step == 4:
             site_url = self._jira_site_var.get().strip()
             email = self._jira_email_var.get().strip()
             token = self._jira_token_var.get().strip()
@@ -195,7 +215,7 @@ class SetupWizard(tk.Toplevel):
                     parent=self,
                 )
                 return False
-        elif self._step == 4:
+        elif self._step == 5:
             url = self._slack_webhook_var.get().strip()
             if not url:
                 messagebox.showwarning("Validation", "Webhook URL is required.", parent=self)
@@ -539,7 +559,74 @@ class SetupWizard(tk.Toplevel):
         for var in self._repo_vars.values():
             var.set(False)
 
-    # ── Step 2: Jira (consolidated — auth + board picker) ───────────────────
+    # ── Step 3: Skill Workflows ─────────────────────────────────────────────
+
+    def _build_step_skills(self):
+        ttk.Label(self._container, text="Skill Workflows",
+                  font=("TkDefaultFont", 16, "bold")).pack(anchor="w", pady=(0, 5))
+        ttk.Label(self._container,
+                  text="Configure which skill commands run for each workflow.\n"
+                       "Enter one command per line. Use {ticket_id} and {pr_url} as placeholders.",
+                  wraplength=500).pack(anchor="w", pady=(0, 10))
+
+        # Create a scrollable frame for the three workflow sections
+        canvas = tk.Canvas(self._container, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self._container, orient="vertical", command=canvas.yview)
+        skills_inner = ttk.Frame(canvas)
+        skills_inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=skills_inner, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        workflows = [
+            ("Work Ticket", "work_ticket", "Commands to run when starting a ticket.\nPlaceholder: {ticket_id}"),
+            ("Review PR", "review_pr", "Commands to run when reviewing a PR.\nPlaceholder: {pr_url}"),
+            ("Fix PR", "fix_pr", "Commands to run when fixing a PR.\nPlaceholders: {pr_url}, {pr_number}, {repo}, {branch}, {org}"),
+        ]
+
+        self._skill_texts: dict[str, tk.Text] = {}
+        self._skill_review_vars: dict[str, tk.BooleanVar] = {}
+        self._skill_builtin_vars: dict[str, tk.BooleanVar] = {}
+
+        for label, key, hint in workflows:
+            section = ttk.LabelFrame(skills_inner, text=label, padding=8)
+            section.pack(fill="x", pady=(0, 8), padx=(0, 5))
+
+            ttk.Label(section, text=hint, foreground="gray", wraplength=450).pack(anchor="w", pady=(0, 5))
+
+            wf = getattr(self._config.skills, key)
+
+            # Builtin toggle (only meaningful for fix_pr)
+            if key == "fix_pr":
+                builtin_var = tk.BooleanVar(value=wf.builtin)
+                self._skill_builtin_vars[key] = builtin_var
+                ttk.Checkbutton(section, text="Use built-in fix prompt",
+                                variable=builtin_var).pack(anchor="w", pady=(0, 3))
+
+            # Commands text area
+            ttk.Label(section, text="Commands (one per line):").pack(anchor="w")
+            text = tk.Text(section, height=3, width=55, wrap="word", font=("Menlo", 11))
+            text.pack(anchor="w", fill="x", pady=(0, 5))
+            text.insert("1.0", "\n".join(wf.commands))
+            self._skill_texts[key] = text
+
+            # Review between steps toggle
+            review_var = tk.BooleanVar(value=wf.review_between)
+            self._skill_review_vars[key] = review_var
+            ttk.Checkbutton(section, text="Require review between steps",
+                            variable=review_var).pack(anchor="w")
+
+    def _save_skills_from_ui(self):
+        for key in ("work_ticket", "review_pr", "fix_pr"):
+            text = self._skill_texts[key].get("1.0", "end").strip()
+            commands = [line.strip() for line in text.splitlines() if line.strip()]
+            review_between = self._skill_review_vars[key].get()
+            builtin = self._skill_builtin_vars.get(key, tk.BooleanVar(value=False)).get()
+            wf = WorkflowConfig(commands=commands, review_between=review_between, builtin=builtin)
+            setattr(self._config.skills, key, wf)
+
+    # ── Step 4: Jira (consolidated — auth + board picker) ─────────────────
 
     def _build_step_jira(self):
         ttk.Label(self._container, text="Jira Configuration",
