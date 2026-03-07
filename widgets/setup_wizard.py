@@ -265,7 +265,7 @@ class SetupWizard(tk.Toplevel):
                 r = subprocess.run(
                     ["claude", "--output-format", "json", "--print", "echo test"],
                     capture_output=True, text=True, timeout=15,
-                    env={**os.environ, "CLAUDE_ACCESS_TOKEN": token},
+                    env={**os.environ, "CLAUDE_CODE_OAUTH_TOKEN": token},
                 )
                 ok = r.returncode == 0
             except Exception:
