@@ -16,7 +16,6 @@ DEFAULT_CLAUDE_PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
 class WorkflowConfig:
     commands: list[str] = field(default_factory=list)
     review_between: bool = False
-    builtin: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -26,7 +25,6 @@ class WorkflowConfig:
         return cls(
             commands=data.get("commands", []),
             review_between=data.get("review_between", False),
-            builtin=data.get("builtin", False),
         )
 
 
@@ -35,7 +33,7 @@ class SkillsConfig:
     work_ticket: WorkflowConfig = field(default_factory=WorkflowConfig)
     review_pr: WorkflowConfig = field(default_factory=WorkflowConfig)
     fix_pr: WorkflowConfig = field(
-        default_factory=lambda: WorkflowConfig(builtin=True)
+        default_factory=lambda: WorkflowConfig(commands=["/builtin:fix-pr {pr_url}"])
     )
 
     def to_dict(self) -> dict:
@@ -53,7 +51,7 @@ class SkillsConfig:
             review_pr=WorkflowConfig.from_dict(data["review_pr"])
             if "review_pr" in data else WorkflowConfig(),
             fix_pr=WorkflowConfig.from_dict(data["fix_pr"])
-            if "fix_pr" in data else WorkflowConfig(builtin=True),
+            if "fix_pr" in data else WorkflowConfig(commands=["/builtin:fix-pr {pr_url}"]),
         )
 
 

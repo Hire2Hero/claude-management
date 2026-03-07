@@ -999,25 +999,26 @@ class Application:
     def _handle_launch_fix(self, pr: PRData):
         """Open a working session to fix the selected PR's issues."""
         workflow = self.config.skills.fix_pr
+        commands = workflow.commands or ["/builtin:fix-pr {pr_url}"]
 
-        if workflow.builtin or not workflow.commands:
-            org = self.config.org
-            prompt = Prompts.fix_all(org, pr.repo, pr)
-        else:
-            placeholders = {
-                "pr_url": pr.url,
-                "pr_number": str(pr.number),
-                "repo": pr.repo,
-                "branch": pr.branch,
-                "org": self.config.org,
-            }
-            runner = SkillRunner(
-                session_name="",
-                commands=workflow.commands,
-                review_between=workflow.review_between,
-                placeholders=placeholders,
-            )
-            prompt = runner.current_prompt
+        placeholders = {
+            "pr_url": pr.url,
+            "pr_number": str(pr.number),
+            "repo": pr.repo,
+            "branch": pr.branch,
+            "org": self.config.org,
+        }
+        runner = SkillRunner(
+            session_name="",
+            commands=commands,
+            review_between=workflow.review_between,
+            placeholders=placeholders,
+        )
+
+        # Expand /builtin:fix-pr to the dynamic Prompts.fix_all() output
+        prompt = runner.current_prompt
+        if prompt and prompt.startswith("/builtin:fix-pr"):
+            prompt = Prompts.fix_all(self.config.org, pr.repo, pr)
 
         repo_cwd = os.path.join(self.config.base_dir, pr.repo)
         ticket_id = pr.ticket_id
@@ -1046,8 +1047,8 @@ class Application:
             )
             self.session_mgr.register_session(session)
 
-        # Register skill runner for multi-step non-builtin fix workflows
-        if not (workflow.builtin or not workflow.commands) and len(workflow.commands) > 1:
+        # Register skill runner for multi-step fix workflows
+        if len(commands) > 1:
             runner.session_name = session.name
             self._skill_runners[session.name] = runner
 

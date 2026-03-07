@@ -46,17 +46,14 @@ class SetupWizard(tk.Toplevel):
                 work_ticket=WorkflowConfig(
                     commands=list(bootstrap.skills.work_ticket.commands),
                     review_between=bootstrap.skills.work_ticket.review_between,
-                    builtin=bootstrap.skills.work_ticket.builtin,
                 ),
                 review_pr=WorkflowConfig(
                     commands=list(bootstrap.skills.review_pr.commands),
                     review_between=bootstrap.skills.review_pr.review_between,
-                    builtin=bootstrap.skills.review_pr.builtin,
                 ),
                 fix_pr=WorkflowConfig(
                     commands=list(bootstrap.skills.fix_pr.commands),
                     review_between=bootstrap.skills.fix_pr.review_between,
-                    builtin=bootstrap.skills.fix_pr.builtin,
                 ),
             ),
         )
@@ -587,7 +584,6 @@ class SetupWizard(tk.Toplevel):
 
         self._skill_texts: dict[str, tk.Text] = {}
         self._skill_review_vars: dict[str, tk.BooleanVar] = {}
-        self._skill_builtin_vars: dict[str, tk.BooleanVar] = {}
 
         for label, key, hint in workflows:
             section = ttk.LabelFrame(skills_inner, text=label, padding=8)
@@ -596,13 +592,6 @@ class SetupWizard(tk.Toplevel):
             ttk.Label(section, text=hint, foreground="gray", wraplength=450).pack(anchor="w", pady=(0, 5))
 
             wf = getattr(self._config.skills, key)
-
-            # Builtin toggle (only meaningful for fix_pr)
-            if key == "fix_pr":
-                builtin_var = tk.BooleanVar(value=wf.builtin)
-                self._skill_builtin_vars[key] = builtin_var
-                ttk.Checkbutton(section, text="Use built-in fix prompt",
-                                variable=builtin_var).pack(anchor="w", pady=(0, 3))
 
             # Commands text area
             ttk.Label(section, text="Commands (one per line):").pack(anchor="w")
@@ -622,8 +611,7 @@ class SetupWizard(tk.Toplevel):
             text = self._skill_texts[key].get("1.0", "end").strip()
             commands = [line.strip() for line in text.splitlines() if line.strip()]
             review_between = self._skill_review_vars[key].get()
-            builtin = self._skill_builtin_vars.get(key, tk.BooleanVar(value=False)).get()
-            wf = WorkflowConfig(commands=commands, review_between=review_between, builtin=builtin)
+            wf = WorkflowConfig(commands=commands, review_between=review_between)
             setattr(self._config.skills, key, wf)
 
     # ── Step 4: Jira (consolidated — auth + board picker) ─────────────────
