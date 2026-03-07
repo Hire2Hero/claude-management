@@ -1,0 +1,20 @@
+# Runtime data — never commit
+*.db
+*.db-wal
+*.db-shm
+session_history/
+session_history.migrated/
+session_summaries/
+session_summaries.migrated/
+state.json
+state.json.migrated
+config.json
+defaults.json
+cb-defaults.json
+h2h-defaults.json
+claude_management.log
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
