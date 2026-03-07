@@ -171,6 +171,11 @@ class SetupWizard(tk.Toplevel):
                     parent=self,
                 )
                 return False
+            # Extract base URL (e.g. strip /browse/KAN-42, /jira/software/..., etc.)
+            from urllib.parse import urlparse
+            parsed = urlparse(site_url)
+            site_url = f"{parsed.scheme}://{parsed.netloc}"
+            self._jira_site_var.set(site_url)
             self._config.jira_base_url = site_url
             self._config.jira_email = email
             self._config.jira_api_token = token
