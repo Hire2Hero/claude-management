@@ -92,6 +92,12 @@ class Application:
         self.root.geometry("1100x700")
         self.root.minsize(800, 500)
 
+        icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon.png")
+        if os.path.exists(icon_path):
+            icon = tk.PhotoImage(file=icon_path)
+            self.root.iconphoto(True, icon)
+            self._app_icon = icon  # prevent garbage collection
+
         self.ui_queue: queue.Queue = queue.Queue()
         self.config: Config | None = None
         self.gh: GitHubClient | None = None
