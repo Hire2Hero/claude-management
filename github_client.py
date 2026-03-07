@@ -16,11 +16,9 @@ PR_FIELDS = ",".join([
     "number", "title", "headRefName", "url",
     "mergeable", "mergeStateStatus",
     "statusCheckRollup", "reviewDecision",
-    "state", "isDraft", "author",
+    "state", "isDraft", "author", "headRefOid",
 ])
 
-
-REVIEW_MARKER = "Reviewing by Claude Local"
 
 
 class GitHubClient:
@@ -64,6 +62,7 @@ class GitHubClient:
                 checks=checks,
                 is_draft=p.get("isDraft", False),
                 author=p.get("author", {}).get("login", ""),
+                head_sha=p.get("headRefOid", ""),
             ))
             pr_numbers.append(p["number"])
 
@@ -253,6 +252,7 @@ class GitHubClient:
                 checks=checks,
                 is_draft=p.get("isDraft", False),
                 author=p.get("author", {}).get("login", ""),
+                head_sha=p.get("headRefOid", ""),
             ))
             pr_numbers.append(p["number"])
 
@@ -275,38 +275,14 @@ class GitHubClient:
                     log.error("Error fetching team PRs for %s: %s", futures[future], e)
         return all_prs
 
-    def has_review_comment(self, repo: str, number: int) -> bool:
-        """Check if a PR already has the review marker comment."""
-        try:
-            result = subprocess.run(
-                [
-                    "gh", "pr", "view", str(number),
-                    "--repo", f"{self.config.org}/{repo}",
-                    "--json", "comments",
-                    "--jq", ".comments[].body",
-                ],
-                capture_output=True, text=True, timeout=15,
-            )
-            if result.returncode == 0:
-                return REVIEW_MARKER in result.stdout
-            return False
-        except (subprocess.TimeoutExpired, OSError) as e:
-            log.error("Failed to check review comment for %s#%d: %s", repo, number, e)
-            return False
-
-    def get_review_status(self, repo: str, number: int, current_user: str) -> str | None:
-        """Determine review status by comparing comment timestamps to latest commit.
-
-        Returns:
-            'reviewed_by_me' if user's latest comment is after latest commit
-            'reviewed_by_claude' if Claude marker comment is after latest commit
-            None if no relevant review found after latest commit
-        """
+    def has_user_review(self, repo: str, number: int, current_user: str, head_sha: str) -> bool:
+        """Check if the current user has left a review comment after the latest commit."""
         query = (
             f'query {{ repository(owner: "{self.config.org}", name: "{repo}") {{'
             f'  pullRequest(number: {number}) {{'
             f'    commits(last: 1) {{ nodes {{ commit {{ committedDate }} }} }}'
-            f'    comments(last: 100) {{ nodes {{ body author {{ login }} createdAt }} }}'
+            f'    comments(last: 50) {{ nodes {{ author {{ login }} createdAt }} }}'
+            f'    reviews(last: 50) {{ nodes {{ author {{ login }} createdAt }} }}'
             f'  }}'
             f'}}}}'
         )
@@ -316,61 +292,27 @@ class GitHubClient:
                 capture_output=True, text=True, timeout=30,
             )
             if result.returncode != 0:
-                log.error("GraphQL review status failed for %s#%d: %s", repo, number, result.stderr.strip())
-                return None
+                log.error("GraphQL user review check failed for %s#%d: %s", repo, number, result.stderr.strip())
+                return False
             data = json.loads(result.stdout)
             pr_data = data.get("data", {}).get("repository", {}).get("pullRequest", {})
         except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError) as e:
-            log.error("Failed to fetch review status for %s#%d: %s", repo, number, e)
-            return None
+            log.error("Failed to check user review for %s#%d: %s", repo, number, e)
+            return False
 
-        # Get latest commit time
         commits = pr_data.get("commits", {}).get("nodes", [])
         if not commits:
-            return None
+            return False
         latest_commit_time = commits[0].get("commit", {}).get("committedDate", "")
 
-        # Check comments newest-first
-        comments = pr_data.get("comments", {}).get("nodes", [])
-        my_latest = None
-        claude_latest = None
-        for c in comments:
-            created = c.get("createdAt", "")
-            if created <= latest_commit_time:
-                continue
-            author = c.get("author", {}).get("login", "")
-            body = c.get("body", "")
-            if author == current_user and my_latest is None:
-                my_latest = created
-            if REVIEW_MARKER in body and claude_latest is None:
-                claude_latest = created
-
-        # User review takes priority
-        if my_latest:
-            return "reviewed_by_me"
-        if claude_latest:
-            return "reviewed_by_claude"
-        return None
-
-    def post_review_comment(self, repo: str, number: int) -> bool:
-        """Post the review marker comment on a PR."""
-        try:
-            result = subprocess.run(
-                [
-                    "gh", "pr", "comment", str(number),
-                    "--repo", f"{self.config.org}/{repo}",
-                    "--body", REVIEW_MARKER,
-                ],
-                capture_output=True, text=True, timeout=15,
-            )
-            if result.returncode == 0:
-                log.info("Posted review marker on %s#%d", repo, number)
-                return True
-            log.error("Failed to post review comment on %s#%d: %s", repo, number, result.stderr.strip())
-            return False
-        except (subprocess.TimeoutExpired, OSError) as e:
-            log.error("Failed to post review comment on %s#%d: %s", repo, number, e)
-            return False
+        # Check PR comments and reviews by the current user after latest commit
+        for source in ("comments", "reviews"):
+            for node in pr_data.get(source, {}).get("nodes", []):
+                author = node.get("author", {}).get("login", "")
+                created = node.get("createdAt", "")
+                if author == current_user and created > latest_commit_time:
+                    return True
+        return False
 
     def list_repos(self, org: str) -> list[str]:
         try:

@@ -6,7 +6,7 @@ import sqlite3
 import threading
 from typing import Optional
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
@@ -35,6 +35,14 @@ CREATE TABLE IF NOT EXISTS tracked_prs (
     slack_sent       INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS pr_reviews (
+    key         TEXT PRIMARY KEY,
+    repo        TEXT NOT NULL,
+    number      INTEGER NOT NULL,
+    head_sha    TEXT NOT NULL,
+    reviewed_at REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS session_history (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     session_name TEXT NOT NULL,
@@ -52,6 +60,18 @@ CREATE TABLE IF NOT EXISTS session_summaries (
 );
 CREATE INDEX IF NOT EXISTS idx_summary_session ON session_summaries(session_name);
 """
+
+_MIGRATIONS = {
+    2: """\
+CREATE TABLE IF NOT EXISTS pr_reviews (
+    key         TEXT PRIMARY KEY,
+    repo        TEXT NOT NULL,
+    number      INTEGER NOT NULL,
+    head_sha    TEXT NOT NULL,
+    reviewed_at REAL NOT NULL
+);
+""",
+}
 
 
 class Database:
@@ -102,6 +122,14 @@ class Database:
             self._conn.executescript(_SCHEMA_SQL)
             self._conn.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
             self._conn.commit()
+        else:
+            current = row["version"]
+            if current < SCHEMA_VERSION:
+                for v in range(current + 1, SCHEMA_VERSION + 1):
+                    if v in _MIGRATIONS:
+                        self._conn.executescript(_MIGRATIONS[v])
+                self._conn.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
+                self._conn.commit()
 
     def close(self):
         self._conn.close()

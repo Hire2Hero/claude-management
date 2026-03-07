@@ -82,6 +82,7 @@ class PRData:
     unresolved_thread_count: int = 0
     is_draft: bool = False
     author: str = ""
+    head_sha: str = ""
 
     @property
     def relevant_checks(self) -> list[CheckRun]:

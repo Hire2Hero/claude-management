@@ -58,7 +58,7 @@ from pr_monitor import PRMonitorThread, Prompts
 from session_manager import SessionManager
 from summary_logger import SummaryLogger
 from tabs.pr_review_tab import (
-    PRReviewTab, STATUS_PENDING, STATUS_REVIEWING, STATUS_REVIEWED,
+    PRReviewTab, STATUS_PENDING, STATUS_REVIEWING,
     STATUS_REVIEWED_BY_ME, STATUS_REVIEWED_BY_CLAUDE,
 )
 from tabs.pr_tab import PRTab
@@ -533,11 +533,6 @@ class Application:
                     repo, number, status = data
                     self._review_statuses[f"{repo}#{number}"] = status
                     self.pr_review_tab.update_review_status(repo, number, status)
-                elif event_type == "review_complete":
-                    repo, number, success = data
-                    new_status = STATUS_REVIEWED_BY_CLAUDE if success else STATUS_PENDING
-                    self._review_statuses[f"{repo}#{number}"] = new_status
-                    self.pr_review_tab.update_review_status(repo, number, new_status)
                 elif event_type == "claude_event":
                     name, evt = data
                     self._handle_claude_event(name, evt)
@@ -1023,8 +1018,26 @@ class Application:
         repo_cwd = os.path.join(self.config.base_dir, pr.repo)
         ticket_id = pr.ticket_id
 
+        # Check for a running session for the same ticket (different from a PR fix session)
+        pr_session = self._find_session_for_pr(pr)
+        ticket_session = self._find_running_session_for_ticket(ticket_id)
+        if ticket_session and ticket_session is not pr_session:
+            choice = messagebox.askyesnocancel(
+                "Existing Session Found",
+                f"A running session exists for {ticket_id}:\n\n"
+                f"{ticket_session.name}\n\nOpen existing session instead of starting a fix?",
+            )
+            if choice is None:  # Cancel
+                return
+            if choice:  # Yes — open existing
+                self._notebook.select(self.session_tab)
+                self.session_tab.update_sessions(self.session_mgr.get_all_sessions(), self._needs_attention)
+                self.session_tab.select_and_open_session(ticket_session)
+                return
+            # No — continue with PR fix
+
         # Look for an existing session for this PR
-        existing = self._find_session_for_pr(pr)
+        existing = pr_session
 
         if existing:
             session = existing
@@ -1058,6 +1071,15 @@ class Application:
         self.session_tab.select_and_open_session(session)
         self._start_claude_process(session, initial_prompt=prompt)
         self.session_tab.update_sessions(self.session_mgr.get_all_sessions(), self._needs_attention)
+
+    def _find_running_session_for_ticket(self, ticket_id: str) -> ManagedSession | None:
+        """Find a running session that matches the given ticket ID."""
+        if not ticket_id:
+            return None
+        for s in self.session_mgr.get_all_sessions():
+            if s.ticket_id and s.ticket_id.lower() == ticket_id.lower() and s.status == SessionStatus.RUNNING:
+                return s
+        return None
 
     def _find_session_for_pr(self, pr: PRData) -> ManagedSession | None:
         """Find an existing working session that matches this PR."""
@@ -1098,6 +1120,23 @@ class Application:
         if dialog.result is None:
             return
         ticket_id, summary = dialog.result
+
+        # Check for existing running session for this ticket
+        existing = self._find_running_session_for_ticket(ticket_id)
+        if existing:
+            choice = messagebox.askyesnocancel(
+                "Existing Session Found",
+                f"A running session already exists for {ticket_id}:\n\n"
+                f"{existing.name}\n\nOpen existing session instead?",
+            )
+            if choice is None:  # Cancel
+                return
+            if choice:  # Yes — open existing
+                self._notebook.select(self.session_tab)
+                self.session_tab.update_sessions(self.session_mgr.get_all_sessions(), self._needs_attention)
+                self.session_tab.select_and_open_session(existing)
+                return
+            # No — continue creating a new session
 
         workflow = self.config.skills.work_ticket
         commands = workflow.commands
@@ -1213,17 +1252,22 @@ class Application:
                 if pr.author != current_user
             ]
 
+            # Load local review records (Claude reviews)
+            review_rows = self._db.fetchall("SELECT key, head_sha FROM pr_reviews")
+            local_reviews = {r["key"]: r["head_sha"] for r in review_rows}
+
             statuses = dict(self._review_statuses)
             for pr in team_prs:
                 key = f"{pr.repo}#{pr.number}"
-                if key not in statuses or statuses[key] in (STATUS_PENDING, STATUS_REVIEWED_BY_ME, STATUS_REVIEWED_BY_CLAUDE):
-                    review_result = self.gh.get_review_status(pr.repo, pr.number, current_user)
-                    if review_result == "reviewed_by_me":
-                        statuses[key] = STATUS_REVIEWED_BY_ME
-                    elif review_result == "reviewed_by_claude":
-                        statuses[key] = STATUS_REVIEWED_BY_CLAUDE
-                    else:
-                        statuses[key] = STATUS_PENDING
+                if statuses.get(key) == STATUS_REVIEWING:
+                    continue
+                # Check if user has reviewed after latest commit
+                if self.gh.has_user_review(pr.repo, pr.number, current_user, pr.head_sha):
+                    statuses[key] = STATUS_REVIEWED_BY_ME
+                elif local_reviews.get(key) == pr.head_sha and pr.head_sha:
+                    statuses[key] = STATUS_REVIEWED_BY_CLAUDE
+                else:
+                    statuses[key] = STATUS_PENDING
 
             self.ui_queue.put(("update_team_prs", (team_prs, statuses)))
             self.ui_queue.put(("review_poll_complete", time.time()))
@@ -1236,6 +1280,21 @@ class Application:
 
         if status == STATUS_REVIEWING:
             return
+
+        # Check if already reviewed at this commit
+        existing = self._db.fetchone(
+            "SELECT head_sha FROM pr_reviews WHERE key = ?", (key,)
+        )
+        if existing and existing["head_sha"] == pr.head_sha and pr.head_sha:
+            proceed = messagebox.askyesno(
+                "Already Reviewed",
+                f"PR {pr.repo}#{pr.number} was already reviewed at this commit.\n"
+                "No new commits since last review.\n\n"
+                "Review again?",
+                parent=self.pr_review_tab,
+            )
+            if not proceed:
+                return
 
         self._review_statuses[key] = STATUS_REVIEWING
         self.pr_review_tab.update_review_status(pr.repo, pr.number, STATUS_REVIEWING)
@@ -1280,11 +1339,14 @@ class Application:
         self._start_claude_process(session, initial_prompt=prompt)
         self.session_tab.update_sessions(self.session_mgr.get_all_sessions(), self._needs_attention)
 
-        # Post marker comment in background
-        def _post_comment():
-            self.gh.post_review_comment(pr.repo, pr.number)
-            self.ui_queue.put(("review_complete", (pr.repo, pr.number, True)))
-        threading.Thread(target=_post_comment, daemon=True).start()
+        # Store review locally
+        self._db.execute(
+            "INSERT OR REPLACE INTO pr_reviews (key, repo, number, head_sha, reviewed_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (key, pr.repo, pr.number, pr.head_sha, time.time()),
+        )
+        self._review_statuses[key] = STATUS_REVIEWED_BY_CLAUDE
+        self.pr_review_tab.update_review_status(pr.repo, pr.number, STATUS_REVIEWED_BY_CLAUDE)
 
     def _handle_run_review_all(self, prs: list[PRData]):
         for pr in prs:

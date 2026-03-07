@@ -343,32 +343,3 @@ class TestFetchTeamPRs:
         assert prs[0].author == "testuser"
 
 
-class TestHasReviewComment:
-    @patch("github_client.subprocess.run")
-    def test_returns_true_when_marker_present(self, mock_run, client):
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="Some comment\nReviewing by Claude Local\nAnother", stderr=""
-        )
-        assert client.has_review_comment("RepoA", 42) is True
-
-    @patch("github_client.subprocess.run")
-    def test_returns_false_when_no_marker(self, mock_run, client):
-        mock_run.return_value = MagicMock(returncode=0, stdout="Some comment\n", stderr="")
-        assert client.has_review_comment("RepoA", 42) is False
-
-    @patch("github_client.subprocess.run")
-    def test_returns_false_on_failure(self, mock_run, client):
-        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
-        assert client.has_review_comment("RepoA", 42) is False
-
-
-class TestPostReviewComment:
-    @patch("github_client.subprocess.run")
-    def test_success(self, mock_run, client):
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        assert client.post_review_comment("RepoA", 42) is True
-
-    @patch("github_client.subprocess.run")
-    def test_failure(self, mock_run, client):
-        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
-        assert client.post_review_comment("RepoA", 42) is False
