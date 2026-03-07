@@ -171,10 +171,7 @@ class SetupWizard(tk.Toplevel):
                     parent=self,
                 )
                 return False
-            # Extract base URL (e.g. strip /browse/KAN-42, /jira/software/..., etc.)
-            from urllib.parse import urlparse
-            parsed = urlparse(site_url)
-            site_url = f"{parsed.scheme}://{parsed.netloc}"
+            site_url = self._normalize_site_url(site_url)
             self._jira_site_var.set(site_url)
             self._config.jira_base_url = site_url
             self._config.jira_email = email
@@ -611,8 +608,14 @@ class SetupWizard(tk.Toplevel):
     def _open_token_page():
         webbrowser.open("https://id.atlassian.com/manage-profile/security/api-tokens")
 
+    def _normalize_site_url(self, url: str) -> str:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        return f"{parsed.scheme}://{parsed.netloc}"
+
     def _test_jira_auth(self):
-        site_url = self._jira_site_var.get().strip()
+        site_url = self._normalize_site_url(self._jira_site_var.get().strip())
+        self._jira_site_var.set(site_url)
         email = self._jira_email_var.get().strip()
         token = self._jira_token_var.get().strip()
         if not site_url or not email or not token:
