@@ -179,7 +179,8 @@ class SetupWizard(tk.Toplevel):
             matched = False
             if board_text and self._jira_boards:
                 for b in self._jira_boards:
-                    display = f"{b.name} ({b.project_key})"
+                    display = (f"\u2605 {b.name} ({b.project_key})" if b.favourite
+                               else f"{b.name} ({b.project_key})")
                     if display == board_text:
                         self._config.jira_board_id = b.id
                         self._config.jira_board_name = b.name
@@ -221,41 +222,70 @@ class SetupWizard(tk.Toplevel):
         ttk.Label(self._container, text="Claude Authentication",
                   font=("TkDefaultFont", 16, "bold")).pack(anchor="w", pady=(0, 5))
         ttk.Label(self._container,
-                  text="Set up a long-lived authentication token for Claude CLI.\n"
-                       "This runs 'claude setup-token' in iTerm, which opens a browser\n"
-                       "for OAuth consent.",
-                  wraplength=500).pack(anchor="w", pady=(0, 15))
+                  text="Paste your Claude OAuth token below.\n\n"
+                       "To generate a token, click 'Setup Token' which runs\n"
+                       "'claude setup-token' in iTerm and opens a browser for OAuth consent.\n"
+                       "Then paste the resulting token below.",
+                  wraplength=500).pack(anchor="w", pady=(0, 10))
 
-        # Setup Token button
         ttk.Button(self._container, text="Setup Token",
                    command=self._launch_setup_token).pack(anchor="w", pady=(0, 10))
 
-        ttk.Label(self._container,
-                  text="After completing the OAuth flow, click 'Verify Token' to auto-detect\n"
-                       "the token, or paste it directly if shown in the terminal.",
-                  wraplength=500, foreground="gray").pack(anchor="w", pady=(0, 10))
-
-        # Verify Token button
-        verify_frame = ttk.Frame(self._container)
-        verify_frame.pack(anchor="w", fill="x", pady=(0, 10))
-        ttk.Button(verify_frame, text="Verify Token",
-                   command=self._verify_claude_token).pack(side="left")
-
-        # Manual token entry
-        ttk.Label(self._container, text="Or paste token directly:").pack(anchor="w")
+        ttk.Label(self._container, text="OAuth Token:").pack(anchor="w")
         token_frame = ttk.Frame(self._container)
         token_frame.pack(anchor="w", fill="x", pady=(3, 0))
-        self._token_entry_var = tk.StringVar()
-        ttk.Entry(token_frame, textvariable=self._token_entry_var, width=50, show="*").pack(side="left", padx=(0, 5))
-        ttk.Button(token_frame, text="Save", command=self._save_pasted_token).pack(side="left")
+        self._token_entry_var = tk.StringVar(
+            value=self._config.claude_oauth_token if self._claude_token_verified else ""
+        )
+        token_entry = ttk.Entry(token_frame, textvariable=self._token_entry_var, width=50, show="*")
+        token_entry.pack(side="left", padx=(0, 5))
+        token_entry.focus_set()
+        ttk.Button(token_frame, text="Verify", command=self._verify_pasted_token).pack(side="left")
 
         self._claude_auth_label = ttk.Label(self._container, text="")
         self._claude_auth_label.pack(anchor="w", pady=(5, 0))
 
-        # Show status if already verified
         if self._claude_token_verified:
             self._claude_auth_label.configure(
                 text="Token verified.", foreground="green",
+            )
+
+    def _verify_pasted_token(self):
+        token = self._token_entry_var.get().strip()
+        if not token:
+            self._claude_auth_label.configure(
+                text="Paste your OAuth token first.", foreground="red",
+            )
+            return
+
+        self._claude_auth_label.configure(text="Verifying...", foreground="gray")
+
+        def _do_verify():
+            try:
+                r = subprocess.run(
+                    ["claude", "--output-format", "json", "--print", "echo test"],
+                    capture_output=True, text=True, timeout=15,
+                    env={**os.environ, "CLAUDE_ACCESS_TOKEN": token},
+                )
+                ok = r.returncode == 0
+            except Exception:
+                ok = False
+            self._bg_queue.put(lambda: self._on_token_verified(token, ok))
+
+        threading.Thread(target=_do_verify, daemon=True).start()
+
+    def _on_token_verified(self, token: str, ok: bool):
+        if ok:
+            self._config.claude_oauth_token = token
+            self._claude_token_verified = True
+            self._claude_auth_label.configure(
+                text="Token verified.", foreground="green",
+            )
+        else:
+            self._claude_token_verified = False
+            self._claude_auth_label.configure(
+                text="Verification failed. Check that the token is correct.",
+                foreground="red",
             )
 
     def _launch_setup_token(self):
@@ -280,63 +310,6 @@ class SetupWizard(tk.Toplevel):
             'end tell'
         )
         subprocess.Popen(["osascript", "-e", applescript])
-
-    def _verify_claude_token(self):
-        candidates = [
-            os.path.expanduser("~/.claude/.credentials.json"),
-            os.path.expanduser("~/.claude/credentials.json"),
-        ]
-        data = None
-        for path in candidates:
-            if os.path.exists(path):
-                try:
-                    with open(path) as f:
-                        data = json.load(f)
-                    break
-                except (OSError, json.JSONDecodeError):
-                    continue
-
-        if data is None:
-            self._claude_token_verified = False
-            self._claude_auth_label.configure(
-                text="Credentials file not found. Run 'Setup Token' and complete the OAuth flow.",
-                foreground="red",
-            )
-            return
-
-        # Try multiple known token locations in the JSON
-        token = (
-            data.get("claudeAiOauth", {}).get("accessToken", "")
-            or data.get("oauthAccessToken", "")
-            or data.get("accessToken", "")
-        )
-        if token:
-            self._config.claude_oauth_token = token
-            self._claude_token_verified = True
-            self._claude_auth_label.configure(
-                text="Token verified.", foreground="green",
-            )
-        else:
-            self._claude_token_verified = False
-            keys = ", ".join(data.keys()) if data else "empty"
-            self._claude_auth_label.configure(
-                text=f"No token found in credentials (keys: {keys}). Complete the OAuth flow first.",
-                foreground="red",
-            )
-
-    def _save_pasted_token(self):
-        token = self._token_entry_var.get().strip()
-        if not token:
-            self._claude_auth_label.configure(
-                text="Paste the token from the terminal output.",
-                foreground="red",
-            )
-            return
-        self._config.claude_oauth_token = token
-        self._claude_token_verified = True
-        self._claude_auth_label.configure(
-            text="Token saved.", foreground="green",
-        )
 
     # ── Step 1: GitHub Org + Repos ─────────────────────────────────────────
 
@@ -651,7 +624,9 @@ class SetupWizard(tk.Toplevel):
     def _show_board_picker(self):
         self._board_frame.pack(anchor="w", fill="x", pady=(8, 0))
         self._board_display_list = [
-            f"{b.name} ({b.project_key})" for b in self._jira_boards
+            f"\u2605 {b.name} ({b.project_key})" if b.favourite
+            else f"{b.name} ({b.project_key})"
+            for b in self._jira_boards
         ]
         self._jira_board_combo["values"] = self._board_display_list
 

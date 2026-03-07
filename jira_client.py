@@ -21,6 +21,7 @@ class JiraBoard:
     id: int
     name: str
     project_key: str
+    favourite: bool = False
 
     @classmethod
     def from_dict(cls, data: dict) -> JiraBoard:
@@ -29,6 +30,7 @@ class JiraBoard:
             id=data["id"],
             name=data.get("name", ""),
             project_key=project.get("projectKey", ""),
+            favourite=data.get("favourite", False),
         )
 
 
@@ -111,6 +113,7 @@ class JiraClient:
             if data.get("isLast", True):
                 break
             start_at += len(data.get("values", []))
+        boards.sort(key=lambda b: (not b.favourite, b.name.lower()))
         return boards
 
     def fetch_board_issues(self, board_id: int) -> list[JiraTicket]:
