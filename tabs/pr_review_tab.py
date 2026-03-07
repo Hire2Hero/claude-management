@@ -80,6 +80,10 @@ class PRReviewTab(ttk.Frame):
         self._count_label = ttk.Label(toolbar, text="0 PRs for review")
         self._count_label.pack(side="right")
 
+        self._hide_drafts_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(toolbar, text="Hide Drafts", variable=self._hide_drafts_var,
+                        command=self._refresh_table).pack(side="right", padx=(0, 10))
+
     _REVIEW_ICON = "\U0001F50D Review"  # 🔍 Review
     _DRAFT_ICON = "\U0001F4DD"         # 📝
 
@@ -153,19 +157,25 @@ class PRReviewTab(ttk.Frame):
             self._loading_frame.destroy()
             self._loading_visible = False
 
+        self._prs = prs
+        self._review_statuses = review_statuses
+        self._refresh_table()
+
+    def _refresh_table(self):
         # Preserve selection
         selected_keys = set()
         for sel in self._tree.selection():
             vals = self._tree.item(sel, "values")
             selected_keys.add((vals[1], vals[2]))  # (repo, #number)
 
-        self._prs = prs
-        self._review_statuses = review_statuses
         self._tree.delete(*self._tree.get_children())
 
-        for pr in sorted(prs, key=lambda p: (p.repo, p.number)):
+        hide_drafts = self._hide_drafts_var.get()
+        visible_prs = [pr for pr in self._prs if not (hide_drafts and pr.is_draft)]
+
+        for pr in sorted(visible_prs, key=lambda p: (p.repo, p.number)):
             key = f"{pr.repo}#{pr.number}"
-            status = review_statuses.get(key, STATUS_PENDING)
+            status = self._review_statuses.get(key, STATUS_PENDING)
             action = self._REVIEW_ICON if status != STATUS_REVIEWING else ""
             draft_icon = self._DRAFT_ICON if pr.is_draft else ""
             pr_tag = "passing" if pr.is_ready_for_review else pr.status.value
@@ -183,10 +193,16 @@ class PRReviewTab(ttk.Frame):
             ), tags=(pr_tag,))
 
         reviewable = sum(
-            1 for pr in prs
-            if review_statuses.get(f"{pr.repo}#{pr.number}", STATUS_PENDING) == STATUS_PENDING
+            1 for pr in visible_prs
+            if self._review_statuses.get(f"{pr.repo}#{pr.number}", STATUS_PENDING) == STATUS_PENDING
         )
-        self._count_label.configure(text=f"{len(prs)} PRs ({reviewable} pending review)")
+        total = len(self._prs)
+        shown = len(visible_prs)
+        hidden = total - shown
+        count_text = f"{shown} PRs ({reviewable} pending review)"
+        if hidden:
+            count_text += f" — {hidden} draft hidden"
+        self._count_label.configure(text=count_text)
 
         # Restore selection and focus
         if selected_keys:
