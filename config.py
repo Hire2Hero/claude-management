@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Optional
 
 DEFAULTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "defaults.json")
-DEFAULT_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_CLAUDE_PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
 
 
