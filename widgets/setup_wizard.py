@@ -82,8 +82,8 @@ class SetupWizard(tk.Toplevel):
 
         self._steps = [
             self._build_step_claude_auth,
-            self._build_step_org_repos,
             self._build_step_base_dir,
+            self._build_step_org_repos,
             self._build_step_jira,
             self._build_step_slack,
         ]
@@ -138,6 +138,15 @@ class SetupWizard(tk.Toplevel):
                 )
                 return False
         elif self._step == 1:
+            base_dir = self._base_dir_var.get().strip()
+            if not base_dir:
+                messagebox.showwarning("Validation", "Base directory is required.", parent=self)
+                return False
+            if not os.path.isdir(base_dir):
+                messagebox.showwarning("Validation", f"Directory does not exist:\n{base_dir}", parent=self)
+                return False
+            self._config.base_dir = base_dir
+        elif self._step == 2:
             org = self._org_var.get().strip()
             if not org:
                 messagebox.showwarning("Validation", "Please select a GitHub organization.", parent=self)
@@ -148,15 +157,6 @@ class SetupWizard(tk.Toplevel):
                 messagebox.showwarning("Validation", "Select at least one repo.", parent=self)
                 return False
             self._config.repos = selected
-        elif self._step == 2:
-            base_dir = self._base_dir_var.get().strip()
-            if not base_dir:
-                messagebox.showwarning("Validation", "Base directory is required.", parent=self)
-                return False
-            if not os.path.isdir(base_dir):
-                messagebox.showwarning("Validation", f"Directory does not exist:\n{base_dir}", parent=self)
-                return False
-            self._config.base_dir = base_dir
         elif self._step == 3:
             site_url = self._jira_site_var.get().strip()
             email = self._jira_email_var.get().strip()
@@ -347,6 +347,14 @@ class SetupWizard(tk.Toplevel):
         ttk.Button(repo_header, text="Check All", command=self._check_all_repos).pack(side="right", padx=(5, 0))
         ttk.Button(repo_header, text="Uncheck All", command=self._uncheck_all_repos).pack(side="right")
 
+        # Search filter
+        search_frame = ttk.Frame(self._repo_section)
+        search_frame.pack(anchor="w", fill="x", pady=(0, 3))
+        ttk.Label(search_frame, text="Search:").pack(side="left", padx=(0, 5))
+        self._repo_search_var = tk.StringVar()
+        self._repo_search_var.trace_add("write", lambda *_: self._filter_repos())
+        ttk.Entry(search_frame, textvariable=self._repo_search_var, width=30).pack(side="left")
+
         self._repo_progress = ttk.Progressbar(self._repo_section, mode="indeterminate")
         self._repo_progress.pack(fill="x", pady=(0, 3))
 
@@ -499,11 +507,27 @@ class SetupWizard(tk.Toplevel):
         for w in self._repo_inner.winfo_children():
             w.destroy()
         self._repo_vars.clear()
+
+        # Pre-select: configured repos + repos that exist as directories in base_dir
         pre_selected = set(self._config.repos)
+        base_dir = self._config.base_dir
+        if base_dir and os.path.isdir(base_dir):
+            for name in repos:
+                if os.path.isdir(os.path.join(base_dir, name)):
+                    pre_selected.add(name)
+
         for name in repos:
             var = tk.BooleanVar(value=name in pre_selected)
             self._repo_vars[name] = var
             ttk.Checkbutton(self._repo_inner, text=name, variable=var).pack(anchor="w")
+
+    def _filter_repos(self):
+        query = self._repo_search_var.get().lower()
+        for w in self._repo_inner.winfo_children():
+            w.destroy()
+        for name, var in self._repo_vars.items():
+            if query in name.lower():
+                ttk.Checkbutton(self._repo_inner, text=name, variable=var).pack(anchor="w")
 
     def _check_all_repos(self):
         for var in self._repo_vars.values():
