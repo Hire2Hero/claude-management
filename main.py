@@ -688,8 +688,9 @@ class Application:
         self._claude_processes[name] = proc
         proc.start()
 
-        # Track PID so refresh_statuses correctly identifies running sessions
+        # Mark session as running and persist
         session.pid = proc.pid
+        session.status = SessionStatus.RUNNING
         self.session_mgr.register_session(session)
 
         # Update chat panel
@@ -802,6 +803,7 @@ class Application:
             pass
 
         elif evt_type == "result":
+            self.session_mgr.set_last_response_at(name, time.time())
             result_text = evt.get("result", "")
             if result_text:
                 text = f"\n{result_text}"

@@ -209,6 +209,7 @@ class ManagedSession:
     cwd: Optional[str] = None
     pr_url: Optional[str] = None
     needs_input: bool = False
+    last_response_at: Optional[float] = None
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -228,6 +229,7 @@ class ManagedSession:
             cwd=d.get("cwd"),
             pr_url=d.get("pr_url"),
             needs_input=d.get("needs_input", False),
+            last_response_at=d.get("last_response_at"),
         )
 
 
