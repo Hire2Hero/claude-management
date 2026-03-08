@@ -94,11 +94,21 @@ class SessionManager:
         with self._lock:
             self._db.execute("DELETE FROM sessions WHERE name = ?", (name,))
 
-    def refresh_statuses(self):
+    def refresh_statuses(self, running_names: set[str] | None = None):
+        """Reconcile session statuses.
+
+        For sessions with a PID, check if the process is alive (legacy).
+        For sessions without a PID (SDK-managed), use running_names from
+        the in-memory ClaudeProcess map to determine liveness.
+        """
         with self._lock:
             rows = self._db.fetchall("SELECT name, pid, status FROM sessions")
+            running = running_names or set()
             for row in rows:
-                alive = is_pid_alive(row["pid"])
+                if row["pid"]:
+                    alive = is_pid_alive(row["pid"])
+                else:
+                    alive = row["name"] in running
                 new_status = SessionStatus.RUNNING if alive else SessionStatus.STOPPED
                 if row["status"] != new_status.value:
                     self._db.execute(

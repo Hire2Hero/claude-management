@@ -177,9 +177,9 @@ class Application:
             if s.status == SessionStatus.RUNNING and s.session_id
         ]
 
-        # Refresh statuses immediately so stale PIDs from a previous run
+        # Refresh statuses immediately so stale sessions from a previous run
         # are marked as stopped before the UI first renders
-        self.session_mgr.refresh_statuses()
+        self.session_mgr.refresh_statuses(self._running_session_names())
         self.session_tab.update_sessions(self.session_mgr.get_all_sessions(), self._needs_attention)
 
         # Fetch team PRs for review tab on startup
@@ -631,7 +631,7 @@ class Application:
 
     def _refresh_sessions(self):
         if self.session_mgr:
-            self.session_mgr.refresh_statuses()
+            self.session_mgr.refresh_statuses(self._running_session_names())
             sessions = self.session_mgr.get_all_sessions()
             self.session_tab.update_sessions(sessions, self._needs_attention)
         # Periodically flush history so it survives unclean shutdowns
@@ -639,6 +639,10 @@ class Application:
         self.root.after(10_000, self._refresh_sessions)
 
     # ── Claude Process Management ────────────────────────────────────────────
+
+    def _running_session_names(self) -> set[str]:
+        """Return names of sessions with an active ClaudeProcess."""
+        return {name for name, proc in self._claude_processes.items() if proc.is_alive}
 
     def _start_claude_process(
         self,
