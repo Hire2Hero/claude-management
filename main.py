@@ -533,6 +533,7 @@ class Application:
             on_merge=self._handle_merge,
             on_mark_ready=self._handle_mark_ready,
             on_watch=self._handle_watch_toggle,
+            poll_interval=self.config.poll_interval,
         )
         self.pr_tab.set_refresh_callback(self._handle_refresh)
         self._notebook.add(self.pr_tab, text="My Pull Requests")

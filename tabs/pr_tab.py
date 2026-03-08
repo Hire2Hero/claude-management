@@ -17,7 +17,8 @@ class PRTab(ttk.Frame):
                  on_launch_fix: Callable, on_send_for_review: Callable,
                  on_merge: Callable | None = None,
                  on_mark_ready: Callable | None = None,
-                 on_watch: Callable | None = None):
+                 on_watch: Callable | None = None,
+                 poll_interval: int = 300):
         super().__init__(parent)
         self._on_update_branch = on_update_branch
         self._on_launch_fix = on_launch_fix
@@ -25,6 +26,7 @@ class PRTab(ttk.Frame):
         self._on_merge = on_merge
         self._on_mark_ready = on_mark_ready
         self._on_watch = on_watch
+        self._poll_interval = poll_interval
         self._prs: list[PRData] = []
         self._last_poll: Optional[float] = None
         self._watched_keys: set[str] = set()
@@ -119,6 +121,19 @@ class PRTab(ttk.Frame):
             relief="solid", borderwidth=1, font=("system", 11),
         )
         self._default_cursor = self._tree["cursor"] or ""
+
+        # Header tooltip for Monitor column
+        poll_mins = self._poll_interval // 60
+        self._header_tip_text = (
+            f"When enabled, this PR will be checked every {poll_mins} minutes.\n"
+            "If a failing build or review comments are detected,\n"
+            "Claude will automatically launch a fix session."
+        )
+        self._header_tooltip = tk.Label(
+            self.winfo_toplevel(), text="", background=tip_bg, foreground=tip_fg,
+            relief="solid", borderwidth=1, font=("system", 11), justify="left",
+        )
+        self._tree.bind("<Motion>", self._on_motion)
 
         # Events
         self._tree.bind("<ButtonRelease-1>", self._on_click)
@@ -273,8 +288,21 @@ class PRTab(ttk.Frame):
     def _on_motion(self, event):
         """Show pointer cursor and tooltip when hovering over action/status columns."""
         col = self._tree.identify_column(event.x)
+        region = self._tree.identify_region(event.x, event.y)
         item = self._tree.identify_row(event.y)
         tip = ""
+
+        # Header tooltip for Monitor column
+        if region == "heading" and col == "#2":
+            self._header_tooltip.configure(text=self._header_tip_text)
+            self._header_tooltip.place(
+                in_=self.winfo_toplevel(),
+                x=event.x_root - self.winfo_toplevel().winfo_rootx() + 12,
+                y=event.y_root - self.winfo_toplevel().winfo_rooty() + 12,
+            )
+            self._header_tooltip.lift()
+            return
+        self._header_tooltip.place_forget()
 
         if item:
             values = self._tree.item(item, "values")
@@ -321,6 +349,7 @@ class PRTab(ttk.Frame):
         """Hide tooltip and restore cursor when leaving the tree."""
         self._tree.configure(cursor=self._default_cursor)
         self._tooltip.place_forget()
+        self._header_tooltip.place_forget()
 
     def _on_right_click(self, event):
         item = self._tree.identify_row(event.y)
