@@ -65,8 +65,8 @@ from tabs.pr_tab import PRTab
 from tabs.session_tab import SessionTab
 from terminal import TerminalLauncher
 from skill_runner import SkillRunner
-from widgets.dialogs import EditReposDialog, NewSessionDialog, SkillSelectionDialog, StartTicketDialog
-from widgets.setup_wizard import SetupWizard
+from widgets.dialogs import NewSessionDialog, SkillSelectionDialog, StartTicketDialog
+from widgets.setup_wizard import SetupWizard, SingleStepSetupDialog
 
 log = logging.getLogger("claude_mgmt")
 
@@ -350,9 +350,15 @@ class Application:
 
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Re-run Setup...", command=self._rerun_setup)
-        file_menu.add_command(label="Edit Repos...", command=self._edit_repos)
-        file_menu.add_command(label="Edit Config...", command=self._edit_config)
+        settings_menu = tk.Menu(file_menu, tearoff=0)
+        settings_menu.add_command(label="Claude Auth...", command=lambda: self._edit_setup_step("claude_auth"))
+        settings_menu.add_command(label="Base Directory...", command=lambda: self._edit_setup_step("base_dir"))
+        settings_menu.add_command(label="Organization & Repos...", command=lambda: self._edit_setup_step("org_repos"))
+        settings_menu.add_command(label="Skill Workflows...", command=lambda: self._edit_setup_step("skills"))
+        settings_menu.add_command(label="Jira...", command=lambda: self._edit_setup_step("jira"))
+        settings_menu.add_command(label="Slack Webhook...", command=lambda: self._edit_setup_step("slack"))
+        file_menu.add_cascade(label="Settings", menu=settings_menu)
+        file_menu.add_command(label="Re-run Full Setup...", command=self._rerun_setup)
         file_menu.add_separator()
         file_menu.add_command(label="Quit", command=self._quit, accelerator="Cmd+Q")
 
@@ -377,31 +383,51 @@ class Application:
             self.monitor.start()
             messagebox.showinfo("Setup", "Configuration updated. Monitor restarted.")
 
-    def _edit_repos(self):
-        dialog = EditReposDialog(self.root, self.config)
+    def _edit_setup_step(self, step_name: str):
+        """Open a single setup step for editing."""
+        dialog = SingleStepSetupDialog(self.root, self.config, step_name)
+        self.root.wait_window(dialog)
         if dialog.result is None:
             return
-        self.config.repos = dialog.result
+        # Apply changed fields from the step's config back to main config
+        new = dialog.result
+        if step_name == "claude_auth":
+            self.config.claude_oauth_token = new.claude_oauth_token
+        elif step_name == "base_dir":
+            self.config.base_dir = new.base_dir
+        elif step_name == "org_repos":
+            self.config.org = new.org
+            self.config.repos = new.repos
+        elif step_name == "skills":
+            self.config.skills = new.skills
+        elif step_name == "jira":
+            self.config.jira_base_url = new.jira_base_url
+            self.config.jira_email = new.jira_email
+            self.config.jira_api_token = new.jira_api_token
+            self.config.jira_board_id = new.jira_board_id
+            self.config.jira_board_name = new.jira_board_name
+        elif step_name == "slack":
+            self.config.slack_webhook_url = new.slack_webhook_url
         self.config.save(CONFIG_PATH)
-        # Restart monitor with new repo list
-        if self.monitor:
-            self.monitor.stop()
-        self.monitor = PRMonitorThread(
-            config=self.config,
-            gh=self.gh,
-            terminal=self.terminal,
-            session_mgr=self.session_mgr,
-            db=self._db,
-            ui_queue=self.ui_queue,
-        )
-        self.monitor.start()
+        # Reinitialize services for steps that affect them
+        if step_name in ("org_repos", "base_dir"):
+            self.gh = GitHubClient(self.config)
+            self.terminal = TerminalLauncher(self.config)
+            self.session_mgr = SessionManager(self.config, self._db)
+            if self.monitor:
+                self.monitor.stop()
+            self.monitor = PRMonitorThread(
+                config=self.config,
+                gh=self.gh,
+                terminal=self.terminal,
+                session_mgr=self.session_mgr,
+                db=self._db,
+                ui_queue=self.ui_queue,
+            )
+            self.monitor.start()
         self._status_label.configure(
             text=f"Org: {self.config.org}  |  Poll interval: {self.config.poll_interval}s",
         )
-
-    def _edit_config(self):
-        import subprocess
-        subprocess.Popen(["open", CONFIG_PATH])
 
     def _show_gear_menu(self):
         """Show the gear dropdown menu at the button location."""
@@ -492,9 +518,14 @@ class Application:
             command=self._toggle_dangerous,
         )
         self._gear_menu.add_separator()
-        self._gear_menu.add_command(label="Edit Repos...", command=self._edit_repos)
-        self._gear_menu.add_command(label="Re-run Setup...", command=self._rerun_setup)
-        self._gear_menu.add_command(label="Edit Config File...", command=self._edit_config)
+        self._gear_menu.add_command(label="Claude Auth...", command=lambda: self._edit_setup_step("claude_auth"))
+        self._gear_menu.add_command(label="Base Directory...", command=lambda: self._edit_setup_step("base_dir"))
+        self._gear_menu.add_command(label="Edit Repos...", command=lambda: self._edit_setup_step("org_repos"))
+        self._gear_menu.add_command(label="Skill Workflows...", command=lambda: self._edit_setup_step("skills"))
+        self._gear_menu.add_command(label="Jira...", command=lambda: self._edit_setup_step("jira"))
+        self._gear_menu.add_command(label="Slack Webhook...", command=lambda: self._edit_setup_step("slack"))
+        self._gear_menu.add_separator()
+        self._gear_menu.add_command(label="Re-run Full Setup...", command=self._rerun_setup)
 
     # ── UI Queue Processing ──────────────────────────────────────────────────
 

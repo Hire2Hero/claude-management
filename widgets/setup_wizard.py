@@ -871,6 +871,119 @@ class SetupWizard(tk.Toplevel):
             self._slack_verify_label.configure(text="Code does not match. Try again.", foreground="red")
 
 
+class SingleStepSetupDialog(SetupWizard):
+    """Open a single setup step in a standalone dialog with Save/Cancel."""
+
+    # Map of user-facing step names to internal step indices
+    STEP_NAMES = {
+        "claude_auth": 0,
+        "base_dir": 1,
+        "org_repos": 2,
+        "skills": 3,
+        "jira": 4,
+        "slack": 5,
+    }
+
+    STEP_TITLES = {
+        "claude_auth": "Claude Authentication",
+        "base_dir": "Base Directory",
+        "org_repos": "Organization & Repos",
+        "skills": "Skill Workflows",
+        "jira": "Jira Configuration",
+        "slack": "Slack Webhook",
+    }
+
+    def __init__(self, parent: tk.Tk, bootstrap: Config, step_name: str):
+        # Bypass SetupWizard.__init__ — we set up our own UI
+        tk.Toplevel.__init__(self, parent)
+        self.title(f"Settings — {self.STEP_TITLES[step_name]}")
+        self.geometry("600x550")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        self.result: Optional[Config] = None
+        self._step_name = step_name
+        self._config = Config(
+            org=bootstrap.org,
+            repos=list(bootstrap.repos),
+            jira_base_url=bootstrap.jira_base_url,
+            jira_email=bootstrap.jira_email,
+            jira_api_token=bootstrap.jira_api_token,
+            jira_board_id=bootstrap.jira_board_id,
+            jira_board_name=bootstrap.jira_board_name,
+            slack_webhook_url=bootstrap.slack_webhook_url,
+            base_dir=bootstrap.base_dir,
+            claude_projects_dir=bootstrap.claude_projects_dir,
+            claude_oauth_token=bootstrap.claude_oauth_token,
+            skills=SkillsConfig(
+                work_ticket=WorkflowConfig(
+                    commands=list(bootstrap.skills.work_ticket.commands),
+                    review_between=bootstrap.skills.work_ticket.review_between,
+                ),
+                review_pr=WorkflowConfig(
+                    commands=list(bootstrap.skills.review_pr.commands),
+                    review_between=bootstrap.skills.review_pr.review_between,
+                ),
+                fix_pr=WorkflowConfig(
+                    commands=list(bootstrap.skills.fix_pr.commands),
+                    review_between=bootstrap.skills.fix_pr.review_between,
+                ),
+            ),
+        )
+        self._bg_queue: queue.Queue = queue.Queue()
+        self._step = self.STEP_NAMES[step_name]
+        self._repo_vars: dict[str, tk.BooleanVar] = {}
+        self._all_orgs: list[str] = []
+        self._all_repos: list[str] = []
+        self._repos_fetched_for_org: str = ""
+        self._git_email = _get_git_email()
+        self._slack_verified = False
+        self._slack_verify_code = ""
+        self._jira_boards: list = []
+        self._jira_auth_ok = False
+        self._claude_token_verified = bool(self._config.claude_oauth_token)
+
+        # Container
+        self._container = ttk.Frame(self, padding=20)
+        self._container.pack(fill="both", expand=True)
+
+        # Navigation — Save / Cancel instead of Back/Next
+        nav = ttk.Frame(self)
+        nav.pack(fill="x", padx=20, pady=(0, 15))
+        ttk.Button(nav, text="Cancel", command=self._on_close).pack(side="left")
+        self._next_btn = ttk.Button(nav, text="Save", command=self._on_save)
+        self._next_btn.pack(side="right")
+        # _back_btn not used but referenced by some step builders
+        self._back_btn = ttk.Button(nav)
+
+        self._steps = [
+            self._build_step_claude_auth,
+            self._build_step_base_dir,
+            self._build_step_org_repos,
+            self._build_step_skills,
+            self._build_step_jira,
+            self._build_step_slack,
+        ]
+
+        # Build just the one step
+        self._next_btn.configure(state="normal")
+        self._steps[self._step]()
+
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._poll_bg()
+
+    def _on_save(self):
+        if not self._validate_step():
+            return
+        self.result = self._config
+        self.destroy()
+
+    def _on_close(self):
+        self.result = None
+        self.destroy()
+
+
 def _get_git_email() -> str:
     """Read user.email from git config, or return empty string."""
     try:
