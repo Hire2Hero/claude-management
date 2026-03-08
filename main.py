@@ -39,22 +39,45 @@ if _tk_ver < 8.6:
     sys.exit(1)
 
 # Check required Python packages
-_missing = []
+_missing_pkgs = []
 try:
     import claude_code_sdk  # noqa: F401
 except ImportError:
-    _missing.append("claude-code-sdk")
-if _missing:
+    _missing_pkgs.append("claude-code-sdk")
+if _missing_pkgs:
     _python = sys.executable
     _cmd = f"{_python} -m pip install -r requirements.txt --break-system-packages"
     print(
-        f"Error: Missing required packages: {', '.join(_missing)}\n"
+        f"Error: Missing required packages: {', '.join(_missing_pkgs)}\n"
         f"Install them with:\n\n  {_cmd}\n",
         file=sys.stderr,
     )
     sys.exit(1)
 
 import json
+import shutil as _shutil_check
+
+# Check required CLI tools — show a GUI alert since tkinter is available
+_missing_tools = []
+if not _shutil_check.which("git"):
+    _missing_tools.append(("git", "brew install git"))
+if not _shutil_check.which("gh"):
+    _missing_tools.append(("gh", "brew install gh && gh auth login"))
+if not _shutil_check.which("claude"):
+    _missing_tools.append(("claude", "npm install -g @anthropic-ai/claude-code"))
+
+if _missing_tools:
+    _names = ", ".join(t[0] for t in _missing_tools)
+    _instructions = "\n".join(f"  • {t[0]}: {t[1]}" for t in _missing_tools)
+    _msg = f"Missing required tools: {_names}\n\nInstall them and try again:\n\n{_instructions}"
+    print(f"Error: {_msg}", file=sys.stderr)
+    _root = tk.Tk()
+    _root.withdraw()
+    tk.messagebox.showerror("Missing Dependencies", _msg)
+    _root.destroy()
+    sys.exit(1)
+
+del _shutil_check
 import logging
 import os
 import queue
