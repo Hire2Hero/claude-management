@@ -267,6 +267,10 @@ class SessionTab(ttk.Frame):
     def _on_motion(self, event):
         col = self._tree.identify_column(event.x)
         item = self._tree.identify_row(event.y)
+        if item and col == "#1":
+            # Name column — always clickable
+            self._tree.configure(cursor="hand2")
+            return
         if item and col == "#4":
             values = self._tree.item(item, "values")
             if values and values[3]:
