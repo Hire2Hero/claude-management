@@ -161,6 +161,13 @@ class Application:
         )
         self.monitor.start()
 
+        # Capture sessions that were running before we refresh statuses
+        # (their PIDs are dead since the app restarted, but they should be resumed)
+        sessions_to_resume = [
+            s for s in self.session_mgr.get_all_sessions()
+            if s.status == SessionStatus.RUNNING and s.session_id
+        ]
+
         # Refresh statuses immediately so stale PIDs from a previous run
         # are marked as stopped before the UI first renders
         self.session_mgr.refresh_statuses()
@@ -172,6 +179,10 @@ class Application:
         # Schedule UI queue processing and session refresh
         self.root.after(100, self._process_ui_queue)
         self.root.after(10_000, self._refresh_sessions)
+
+        # Resume sessions that were running before the app closed
+        if sessions_to_resume:
+            self.root.after(500, lambda: self._resume_previous_sessions(sessions_to_resume))
 
 
     def _setup_logging(self):
@@ -669,6 +680,19 @@ class Application:
         proc = self._claude_processes.pop(name, None)
         if proc:
             proc.stop()
+
+    def _resume_previous_sessions(self, sessions: list[ManagedSession]):
+        """Resume sessions that were running before the app closed."""
+        log.info("Resuming %d sessions from previous run", len(sessions))
+        for session in sessions:
+            # Re-fetch from DB (refresh_statuses marked them stopped)
+            current = self._find_session_by_name(session.name)
+            if not current or not current.session_id:
+                continue
+            log.info("Resuming session: %s (session_id=%s)", current.name, current.session_id)
+            self._start_claude_process(current, initial_prompt="continue", is_resume=True)
+        self.session_tab.update_sessions(
+            self.session_mgr.get_all_sessions(), self._needs_attention)
 
     # ── Claude Event Routing ─────────────────────────────────────────────────
 
