@@ -1169,13 +1169,9 @@ class Application:
         return None
 
     def _find_session_for_pr(self, pr: PRData) -> ManagedSession | None:
-        """Find an existing working session that matches this PR."""
+        """Find an existing working session that matches this PR by repo + PR number."""
         for s in self.session_mgr.get_all_sessions():
-            # Match by ticket_id if available
-            if pr.ticket_id and s.ticket_id and pr.ticket_id == s.ticket_id:
-                return s
-            # Match by repo + PR number in session name
-            if pr.repo in (s.repo or "") and f"#{pr.number}" in s.name:
+            if s.repo == pr.repo and f"#{pr.number}" in s.name:
                 return s
         return None
 
