@@ -17,6 +17,7 @@ from models import (
     classify_pr, is_pid_alive,
 )
 from session_manager import SessionManager
+from skill_runner import _version_key
 from terminal import TerminalLauncher
 
 log = logging.getLogger("claude_mgmt")
@@ -52,7 +53,7 @@ class Prompts:
                             if os.path.isdir(os.path.join(plugin_path, d))]
                 if not versions:
                     continue
-                latest = sorted(versions)[-1]
+                latest = sorted(versions, key=_version_key)[-1]
                 md_path = os.path.join(plugin_path, latest, "skills", name, "SKILL.md")
                 if os.path.isfile(md_path):
                     try:

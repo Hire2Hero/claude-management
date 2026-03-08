@@ -1130,7 +1130,6 @@ class Application:
         if prompt and prompt.startswith("/builtin:fix-pr"):
             prompt = Prompts.fix_all(self.config.org, pr.repo, pr)
 
-        repo_cwd = os.path.join(self.config.base_dir, pr.repo)
         ticket_id = pr.ticket_id
 
         # Check for an existing session for this PR
@@ -1170,7 +1169,7 @@ class Application:
 
         if existing:
             session = existing
-            session.cwd = session.cwd or repo_cwd
+            session.cwd = session.cwd or self.config.base_dir
             session.pr_url = session.pr_url or pr.url
         else:
             name = f"Fix {pr.repo}#{pr.number}"
@@ -1183,7 +1182,7 @@ class Application:
                 status=SessionStatus.RUNNING,
                 created_at=time.time(),
                 ticket_id=ticket_id,
-                cwd=repo_cwd,
+                cwd=self.config.base_dir,
                 session_id=self.session_mgr.find_claude_session(pr.repo, ticket_id),
                 pr_url=pr.url,
             )
@@ -1444,7 +1443,6 @@ class Application:
         )
 
         prompt = runner.current_prompt
-        repo_cwd = os.path.join(self.config.base_dir, pr.repo)
 
         name = f"Review {pr.repo}#{pr.number}"
         runner.session_name = name
@@ -1455,7 +1453,7 @@ class Application:
             status=SessionStatus.RUNNING,
             created_at=time.time(),
             ticket_id=pr.ticket_id,
-            cwd=repo_cwd,
+            cwd=self.config.base_dir,
             pr_url=pr.url,
         )
         self.session_mgr.register_session(session)
