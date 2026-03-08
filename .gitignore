@@ -18,3 +18,7 @@ claude_management.log
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Build artifacts
+*.dmg
+Claude Management.app/
