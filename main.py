@@ -165,6 +165,8 @@ class Application:
         self._needs_attention: set[str] = set()
         # Active skill runners keyed by session name
         self._skill_runners: dict[str, SkillRunner] = {}
+        # Sessions where the last tool was AskUserQuestion (pending user response)
+        self._pending_ask: dict[str, str] = {}  # name -> question text
 
         # Initialize SQLite database
         self._db = Database(DB_PATH)
@@ -812,6 +814,22 @@ class Application:
             elif inner_type == "content_block_stop":
                 buf = self._tool_input_buf.pop(name, None)
                 if buf:
+                    # Track AskUserQuestion — the SDK can't handle it
+                    # interactively, so the query will exit. We capture the
+                    # question so _handle_claude_exit can keep the session
+                    # alive for the user to respond.
+                    if buf["tool"] == "AskUserQuestion":
+                        try:
+                            import json as _json
+                            q_data = _json.loads(buf["json"]) if buf["json"] else {}
+                            question = q_data.get("question", buf["json"])
+                        except (ValueError, TypeError):
+                            question = buf["json"]
+                        self._pending_ask[name] = question
+                    else:
+                        # Any non-ask tool clears a pending ask
+                        self._pending_ask.pop(name, None)
+
                     # Tool block completed
                     summary = self._tool_summary(buf["tool"], buf["json"])
                     tool_text = f"\n[{summary}]\n"
@@ -927,7 +945,6 @@ class Application:
 
     def _handle_claude_exit(self, name: str, returncode: int | None, gen: int = 0):
         """Handle Claude process exit."""
-        self._needs_attention.discard(name)
         self._skill_runners.pop(name, None)
         # Ignore stale exit events from replaced processes
         if self._session_gen.get(name, 0) != gen:
@@ -935,6 +952,25 @@ class Application:
                        name, gen, self._session_gen.get(name, 0))
             return
 
+        # If AskUserQuestion was pending, the SDK exited because it can't
+        # handle interactive prompts. Keep the session alive so the user can
+        # respond via the chat input — their message will resume the session.
+        question = self._pending_ask.pop(name, None)
+        if question is not None and returncode == 0:
+            log.info("AskUserQuestion pending for %s — keeping session alive", name)
+            self._claude_processes.pop(name, None)
+            self._needs_attention.add(name)
+            self.session_mgr.set_needs_input(name, True)
+            self.session_tab.update_sessions(
+                self.session_mgr.get_all_sessions(), self._needs_attention)
+
+            panel = self.session_tab.chat_panel
+            if self.session_tab._active_session_name == name:
+                panel.set_status(f"Session: {name} | Waiting for input", running=True)
+                panel.set_input_enabled(True)
+            return
+
+        self._needs_attention.discard(name)
         self._claude_processes.pop(name, None)
 
         # Update session status
@@ -1078,6 +1114,10 @@ class Application:
             # Already running
             panel.set_status(f"Session: {name} | Running", running=True)
             panel.set_input_enabled(True)
+        elif name in self._needs_attention:
+            # Waiting for user input (e.g. AskUserQuestion)
+            panel.set_status(f"Session: {name} | Waiting for input", running=True)
+            panel.set_input_enabled(True)
         else:
             # Stopped — show history with Resume button, enable input for resume+send
             panel.set_status(f"Session: {name} | Stopped", running=False)
@@ -1086,6 +1126,7 @@ class Application:
     def _handle_send_message(self, name: str, text: str):
         """Send a user message to the Claude process (restarts with --resume)."""
         self._needs_attention.discard(name)
+        self._pending_ask.pop(name, None)
         self.session_tab.update_sessions(
             self.session_mgr.get_all_sessions(), self._needs_attention)
         proc = self._claude_processes.get(name)
@@ -1112,6 +1153,7 @@ class Application:
     def _handle_stop_session(self, name: str):
         """Stop the Claude process for a session."""
         self._needs_attention.discard(name)
+        self._pending_ask.pop(name, None)
         self._stop_claude_process(name)
 
         stop_text = "\n--- Stopped by user ---\n"
@@ -1126,6 +1168,7 @@ class Application:
 
     def _handle_remove_session(self, name: str):
         """Remove a stopped session from the registry."""
+        self._pending_ask.pop(name, None)
         self._stop_claude_process(name)
         self._history_store.remove(name)
         self._summary_logger.remove(name)
