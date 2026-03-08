@@ -6,7 +6,7 @@ import sqlite3
 import threading
 from typing import Optional
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     created_at  REAL NOT NULL DEFAULT 0.0,
     ticket_id   TEXT,
     cwd         TEXT,
-    pr_url      TEXT
+    pr_url      TEXT,
+    needs_input INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS tracked_prs (
@@ -75,6 +76,7 @@ CREATE TABLE IF NOT EXISTS pr_reviews (
 """,
     3: "ALTER TABLE tracked_prs ADD COLUMN watched INTEGER NOT NULL DEFAULT 0;",
     4: "ALTER TABLE sessions ADD COLUMN pr_url TEXT;",
+    5: "ALTER TABLE sessions ADD COLUMN needs_input INTEGER NOT NULL DEFAULT 0;",
 }
 
 

@@ -122,7 +122,7 @@ class PRData:
             return PRStatus.CONFLICTS
         if self.has_failing_checks:
             return PRStatus.CI_FAILING
-        if self.review_decision == "CHANGES_REQUESTED":
+        if self.review_decision == "CHANGES_REQUESTED" and self.unresolved_thread_count > 0:
             return PRStatus.CHANGES_REQUESTED
         if self.all_checks_passed and self.review_decision == "APPROVED":
             return PRStatus.APPROVED
@@ -142,8 +142,8 @@ class PRData:
             problems.append("CI Failing")
         if self.unresolved_thread_count > 0:
             problems.append(f"{self.unresolved_thread_count} Unresolved Comment{'s' if self.unresolved_thread_count != 1 else ''}")
-        elif self.review_decision == "CHANGES_REQUESTED":
-            problems.append("Changes Requested")
+            if self.review_decision == "CHANGES_REQUESTED":
+                problems.append("Changes Requested")
         return problems
 
     @property
@@ -208,6 +208,7 @@ class ManagedSession:
     ticket_id: Optional[str] = None
     cwd: Optional[str] = None
     pr_url: Optional[str] = None
+    needs_input: bool = False
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -226,6 +227,7 @@ class ManagedSession:
             ticket_id=d.get("ticket_id"),
             cwd=d.get("cwd"),
             pr_url=d.get("pr_url"),
+            needs_input=d.get("needs_input", False),
         )
 
 
@@ -260,7 +262,7 @@ def classify_pr(pr: PRData, tracked: TrackedPR) -> tuple[PRIssueType, PRAction]:
     if pr.has_failing_checks:
         return PRIssueType.CI_FAILING, PRAction.LAUNCH_CLAUDE
 
-    if pr.review_decision == "CHANGES_REQUESTED":
+    if pr.review_decision == "CHANGES_REQUESTED" and pr.unresolved_thread_count > 0:
         return PRIssueType.CHANGES_REQUESTED, PRAction.LAUNCH_CLAUDE
 
     if tracked.ci_was_failing and pr.all_checks_passed and not tracked.slack_sent:

@@ -594,11 +594,28 @@ class Application:
                     self.pr_review_tab.update_review_status(repo, number, status)
                 elif event_type == "auto_launch_fix":
                     pr = data
-                    # Guard: skip if a Claude process is already running for this PR
                     existing = self._find_session_for_pr(pr)
                     if existing and existing.name in self._claude_processes and self._claude_processes[existing.name].is_alive:
-                        log.info("Auto-fix skipped for %s#%d — Claude already running in session %s",
-                                 pr.repo, pr.number, existing.name)
+                        if existing.name in self._needs_attention:
+                            # Only send if no other session is actively running
+                            other_active = any(
+                                n != existing.name and p.is_alive and n not in self._needs_attention
+                                for n, p in self._claude_processes.items()
+                            )
+                            if other_active:
+                                log.info("Auto-fix deferred for %s#%d — another session is actively running",
+                                         pr.repo, pr.number)
+                            else:
+                                # Session waiting for input — send new fix prompt
+                                log.info("Auto-fix: sending fix prompt to waiting session %s for %s#%d",
+                                         existing.name, pr.repo, pr.number)
+                                prompt = Prompts.fix_all(self.config.org, pr.repo, pr)
+                                prompt += WORKTREE_INSTRUCTIONS + SUMMARY_INSTRUCTIONS
+                                self._handle_send_message(existing.name, prompt)
+                        else:
+                            # Session actively processing — skip
+                            log.info("Auto-fix skipped for %s#%d — Claude actively running in session %s",
+                                     pr.repo, pr.number, existing.name)
                     else:
                         log.info("Auto-launching fix for watched PR %s#%d", pr.repo, pr.number)
                         self._handle_launch_fix(pr, auto=True)
@@ -639,6 +656,7 @@ class Application:
             self._stop_claude_process(name)
 
         self._needs_attention.discard(name)
+        self.session_mgr.set_needs_input(name, False)
 
         # Log session start to summary (before appending instructions)
         if initial_prompt and not is_resume:
@@ -698,8 +716,15 @@ class Application:
             current = self._find_session_by_name(session.name)
             if not current or not current.session_id:
                 continue
-            log.info("Resuming session: %s (session_id=%s)", current.name, current.session_id)
-            self._start_claude_process(current, initial_prompt="continue", is_resume=True)
+            if session.needs_input:
+                # Session was waiting for user input — resume without sending "continue"
+                log.info("Resuming needs-input session: %s (session_id=%s)", current.name, current.session_id)
+                self._start_claude_process(current, initial_prompt=None, is_resume=True)
+                self._needs_attention.add(current.name)
+                self.session_mgr.set_needs_input(current.name, True)
+            else:
+                log.info("Resuming session: %s (session_id=%s)", current.name, current.session_id)
+                self._start_claude_process(current, initial_prompt="continue", is_resume=True)
         self.session_tab.update_sessions(
             self.session_mgr.get_all_sessions(), self._needs_attention)
 
@@ -787,6 +812,7 @@ class Application:
             proc = self._claude_processes.get(name)
             if proc and proc.is_alive:
                 self._needs_attention.add(name)
+                self.session_mgr.set_needs_input(name, True)
                 self.session_tab.update_sessions(
                     self.session_mgr.get_all_sessions(), self._needs_attention)
 
