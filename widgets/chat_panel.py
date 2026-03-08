@@ -35,25 +35,29 @@ class ChatPanel(ttk.Frame):
 
         # Buttons packed right-to-left first so they always have space
         self._close_btn = ttk.Button(
-            status_frame, text="Close", command=self._on_close
+            status_frame, text="\u2715", width=3, command=self._on_close
         )
         self._close_btn.pack(side="right")
+        self._add_tooltip(self._close_btn, "Close panel")
 
         self._summary_btn = ttk.Button(
-            status_frame, text="Summary", command=self._on_toggle_summary
+            status_frame, text="\U0001F4CB", width=3, command=self._on_toggle_summary
         )
-        self._summary_btn.pack(side="right", padx=(0, 5))
+        self._summary_btn.pack(side="right", padx=(0, 3))
+        self._add_tooltip(self._summary_btn, "Toggle summary")
 
         # PR link — hidden by default, shown when session has a PR URL
         self._pr_url: Optional[str] = None
         self._pr_btn = ttk.Button(
-            status_frame, text="\U0001F517 PR", command=self._open_pr
+            status_frame, text="\U0001F500", width=3, command=self._open_pr
         )
+        self._add_tooltip(self._pr_btn, "Open pull request")
 
         # Stop — hidden by default, shown for running sessions
         self._stop_btn = ttk.Button(
-            status_frame, text="Stop", command=self._on_stop
+            status_frame, text="\U0001F6D1", width=3, command=self._on_stop
         )
+        self._add_tooltip(self._stop_btn, "Stop session")
 
         # Status label last so it fills remaining space and truncates
         self._status_label = tk.Label(
@@ -255,6 +259,28 @@ class ChatPanel(ttk.Frame):
         text = self._input.get().strip()
         self._input.delete(0, "end")
         self._on_send(text or "continue")
+
+    def _add_tooltip(self, widget: tk.Widget, text: str):
+        """Attach a hover tooltip to a widget."""
+        tip = tk.Toplevel(widget)
+        tip.withdraw()
+        tip.overrideredirect(True)
+        label = tk.Label(
+            tip, text=text, background="#ffffe0", foreground="#000",
+            relief="solid", borderwidth=1, font=("TkDefaultFont", 11),
+            padx=4, pady=2,
+        )
+        label.pack()
+
+        def show(event):
+            tip.geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
+            tip.deiconify()
+
+        def hide(_event):
+            tip.withdraw()
+
+        widget.bind("<Enter>", show)
+        widget.bind("<Leave>", hide)
 
     def _trim(self):
         """Trim text widget to MAX_LINES."""
