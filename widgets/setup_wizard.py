@@ -13,7 +13,7 @@ import webbrowser
 from tkinter import ttk, messagebox, filedialog
 from typing import Optional
 
-from config import Config, SkillsConfig, WorkflowConfig
+from config import Config, SkillsConfig, TriageConfig, WorkflowConfig
 
 log = logging.getLogger("claude_mgmt")
 
@@ -55,6 +55,11 @@ class SetupWizard(tk.Toplevel):
                     commands=list(bootstrap.skills.fix_pr.commands),
                     review_between=bootstrap.skills.fix_pr.review_between,
                 ),
+                triages=[TriageConfig(
+                    description=t.description,
+                    skill_name=t.skill_name,
+                    placeholder=t.placeholder,
+                ) for t in bootstrap.skills.triages],
             ),
         )
         self._bg_queue: queue.Queue = queue.Queue()
@@ -606,6 +611,25 @@ class SetupWizard(tk.Toplevel):
             ttk.Checkbutton(section, text="Require review between steps",
                             variable=review_var).pack(anchor="w")
 
+        # ── Triages section ──
+        triage_section = ttk.LabelFrame(skills_inner, text="Triages", padding=8)
+        triage_section.pack(fill="x", pady=(0, 8), padx=(0, 5))
+
+        ttk.Label(triage_section,
+                  text="One triage per line: description | skill_command | placeholder\n"
+                       "Example: Debug Prod Error | /plugin:triage-prod {trace} | <TRACE_ID>",
+                  foreground="gray", wraplength=450).pack(anchor="w", pady=(0, 5))
+
+        self._triage_text = tk.Text(triage_section, height=4, width=55, wrap="word", font=("Menlo", 11))
+        self._triage_text.pack(anchor="w", fill="x", pady=(0, 5))
+
+        # Pre-populate from existing triages
+        lines = []
+        for t in self._config.skills.triages:
+            lines.append(f"{t.description} | {t.skill_name} | {t.placeholder}")
+        if lines:
+            self._triage_text.insert("1.0", "\n".join(lines))
+
     def _save_skills_from_ui(self):
         for key in ("work_ticket", "review_pr", "fix_pr"):
             text = self._skill_texts[key].get("1.0", "end").strip()
@@ -613,6 +637,22 @@ class SetupWizard(tk.Toplevel):
             review_between = self._skill_review_vars[key].get()
             wf = WorkflowConfig(commands=commands, review_between=review_between)
             setattr(self._config.skills, key, wf)
+
+        # Parse triages
+        triage_text = self._triage_text.get("1.0", "end").strip()
+        triages = []
+        for line in triage_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) >= 3:
+                triages.append(TriageConfig(
+                    description=parts[0],
+                    skill_name=parts[1],
+                    placeholder=parts[2],
+                ))
+        self._config.skills.triages = triages
 
     # ── Step 4: Jira (consolidated — auth + board picker) ─────────────────
 
@@ -929,6 +969,11 @@ class SingleStepSetupDialog(SetupWizard):
                     commands=list(bootstrap.skills.fix_pr.commands),
                     review_between=bootstrap.skills.fix_pr.review_between,
                 ),
+                triages=[TriageConfig(
+                    description=t.description,
+                    skill_name=t.skill_name,
+                    placeholder=t.placeholder,
+                ) for t in bootstrap.skills.triages],
             ),
         )
         self._bg_queue: queue.Queue = queue.Queue()

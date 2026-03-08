@@ -29,18 +29,38 @@ class WorkflowConfig:
 
 
 @dataclass
+class TriageConfig:
+    description: str = ""
+    skill_name: str = ""
+    placeholder: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> TriageConfig:
+        return cls(
+            description=data.get("description", ""),
+            skill_name=data.get("skill_name", ""),
+            placeholder=data.get("placeholder", ""),
+        )
+
+
+@dataclass
 class SkillsConfig:
     work_ticket: WorkflowConfig = field(default_factory=WorkflowConfig)
     review_pr: WorkflowConfig = field(default_factory=WorkflowConfig)
     fix_pr: WorkflowConfig = field(
         default_factory=lambda: WorkflowConfig(commands=["/builtin:fix-pr {pr_url}"])
     )
+    triages: list[TriageConfig] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
             "work_ticket": self.work_ticket.to_dict(),
             "review_pr": self.review_pr.to_dict(),
             "fix_pr": self.fix_pr.to_dict(),
+            "triages": [t.to_dict() for t in self.triages],
         }
 
     @classmethod
@@ -52,6 +72,7 @@ class SkillsConfig:
             if "review_pr" in data else WorkflowConfig(),
             fix_pr=WorkflowConfig.from_dict(data["fix_pr"])
             if "fix_pr" in data else WorkflowConfig(commands=["/builtin:fix-pr {pr_url}"]),
+            triages=[TriageConfig.from_dict(t) for t in data.get("triages", [])],
         )
 
 

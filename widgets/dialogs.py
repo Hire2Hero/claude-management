@@ -11,7 +11,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Optional
 
-from config import Config
+from config import Config, TriageConfig
 
 log = logging.getLogger("claude_mgmt")
 
@@ -310,6 +310,89 @@ class SkillSelectionDialog(tk.Toplevel):
     def _start(self):
         sel = self._listbox.curselection()
         self.result = sel[0] if sel else 0
+        self.destroy()
+
+    def _cancel(self):
+        self.result = None
+        self.destroy()
+
+
+class TriageDialog(tk.Toplevel):
+    """Dialog for selecting a triage type and filling in required data."""
+
+    def __init__(self, parent: tk.Widget, triages: list[TriageConfig]):
+        super().__init__(parent)
+        self.title("Start Triage")
+        self.geometry("500x280")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        self.result: Optional[tuple[str, str]] = None  # (session_name, expanded_command)
+        self._triages = triages
+
+        frame = ttk.Frame(self, padding=20)
+        frame.pack(fill="both", expand=True)
+
+        # Triage type selector
+        ttk.Label(frame, text="Triage Type:").pack(anchor="w")
+        self._combo_var = tk.StringVar()
+        descriptions = [t.description for t in triages]
+        self._combo = ttk.Combobox(
+            frame, textvariable=self._combo_var, values=descriptions,
+            state="readonly", width=45,
+        )
+        self._combo.pack(anchor="w", pady=(0, 10))
+        self._combo.bind("<<ComboboxSelected>>", self._on_type_changed)
+        if descriptions:
+            self._combo.current(0)
+
+        # Input field
+        ttk.Label(frame, text="Input:").pack(anchor="w")
+        self._input_text = tk.Text(frame, height=4, width=50, wrap="word",
+                                    relief="solid", borderwidth=1)
+        self._input_text.pack(anchor="w", fill="x", pady=(0, 15))
+
+        # Pre-fill with first triage's placeholder
+        if triages:
+            self._input_text.insert("1.0", triages[0].placeholder)
+
+        # Buttons
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill="x")
+        ttk.Button(btn_frame, text="Cancel", command=self._cancel).pack(side="right", padx=(5, 0))
+        ttk.Button(btn_frame, text="Create", command=self._create).pack(side="right")
+
+        self.protocol("WM_DELETE_WINDOW", self._cancel)
+        self.wait_window()
+
+    def _on_type_changed(self, _event=None):
+        idx = self._combo.current()
+        if 0 <= idx < len(self._triages):
+            self._input_text.delete("1.0", "end")
+            self._input_text.insert("1.0", self._triages[idx].placeholder)
+
+    def _create(self):
+        idx = self._combo.current()
+        if idx < 0 or idx >= len(self._triages):
+            messagebox.showwarning("Validation", "Select a triage type.", parent=self)
+            return
+
+        triage = self._triages[idx]
+        user_input = self._input_text.get("1.0", "end").strip()
+
+        if not user_input or user_input == triage.placeholder:
+            messagebox.showwarning(
+                "Validation",
+                "Please replace the placeholder with actual data.",
+                parent=self,
+            )
+            return
+
+        # Replace {token} placeholders in skill_name with user input
+        expanded = re.sub(r"\{[^}]+\}", user_input, triage.skill_name)
+        session_name = f"Triage: {triage.description}"
+        self.result = (session_name, expanded)
         self.destroy()
 
     def _cancel(self):

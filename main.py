@@ -104,7 +104,7 @@ from tabs.pr_tab import PRTab
 from tabs.session_tab import SessionTab
 from terminal import TerminalLauncher
 from skill_runner import SkillRunner
-from widgets.dialogs import NewSessionDialog, SkillSelectionDialog, StartTicketDialog
+from widgets.dialogs import NewSessionDialog, SkillSelectionDialog, StartTicketDialog, TriageDialog
 from widgets.setup_wizard import SetupWizard, SingleStepSetupDialog
 
 log = logging.getLogger("claude_mgmt")
@@ -459,6 +459,7 @@ class Application:
             self.config.repos = new.repos
         elif step_name == "skills":
             self.config.skills = new.skills
+            self.session_tab.refresh_triage_visibility()
         elif step_name == "jira":
             self.config.jira_base_url = new.jira_base_url
             self.config.jira_email = new.jira_email
@@ -543,6 +544,7 @@ class Application:
             config=self.config,
             on_new_session=self._handle_new_session,
             on_start_ticket=self._handle_start_ticket,
+            on_triage=self._handle_triage,
             on_open_session=self._handle_open_session,
             on_send_message=self._handle_send_message,
             on_stop_session=self._handle_stop_session,
@@ -1355,6 +1357,36 @@ class Application:
         self.session_tab.update_sessions(self.session_mgr.get_all_sessions(), self._needs_attention)
         self.session_tab.select_and_open_session(session)
         self._start_claude_process(session, initial_prompt=initial_prompt)
+        self.session_tab.update_sessions(self.session_mgr.get_all_sessions(), self._needs_attention)
+
+    def _handle_triage(self):
+        triages = self.config.skills.triages
+        if not triages:
+            return
+
+        from skill_runner import expand_skill_command
+
+        dialog = TriageDialog(self.root, triages)
+        if dialog.result is None:
+            return
+        name, expanded_command = dialog.result
+
+        prompt = expand_skill_command(expanded_command)
+
+        session = ManagedSession(
+            name=name,
+            repo="",
+            pid=None,
+            status=SessionStatus.RUNNING,
+            created_at=time.time(),
+            ticket_id="",
+            cwd=self.config.base_dir,
+        )
+        self.session_mgr.register_session(session)
+
+        self.session_tab.update_sessions(self.session_mgr.get_all_sessions(), self._needs_attention)
+        self.session_tab.select_and_open_session(session)
+        self._start_claude_process(session, initial_prompt=prompt)
         self.session_tab.update_sessions(self.session_mgr.get_all_sessions(), self._needs_attention)
 
     def _handle_send_for_review(self, pr: PRData):

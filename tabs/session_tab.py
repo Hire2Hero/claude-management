@@ -23,12 +23,14 @@ class SessionTab(ttk.Frame):
         on_open_session: Callable[[ManagedSession], None],
         on_send_message: Callable[[str, str], None],
         on_stop_session: Callable[[str], None],
+        on_triage: Callable = lambda: None,
         on_remove_session: Callable[[str], None] = lambda name: None,
     ):
         super().__init__(parent)
         self._config = config
         self._on_new_session = on_new_session
         self._on_start_ticket = on_start_ticket
+        self._on_triage = on_triage
         self._on_open_session = on_open_session
         self._on_send_message = on_send_message
         self._on_stop_session = on_stop_session
@@ -48,6 +50,11 @@ class SessionTab(ttk.Frame):
                    command=self._on_new_session).pack(side="left", padx=(0, 5))
         ttk.Button(toolbar, text="Start Working a Ticket",
                    command=self._on_start_ticket).pack(side="left", padx=(0, 5))
+
+        self._triage_btn = ttk.Button(toolbar, text="Triage",
+                                       command=self._on_triage)
+        if self._config.skills.triages:
+            self._triage_btn.pack(side="left", padx=(0, 5))
 
         self._count_label = ttk.Label(toolbar, text="0 sessions")
         self._count_label.pack(side="right")
@@ -181,6 +188,14 @@ class SessionTab(ttk.Frame):
                     self._tree.selection_set(item)
                     self._tree.focus(item)
                     break
+
+    def refresh_triage_visibility(self):
+        """Show or hide the Triage button based on current config."""
+        if self._config.skills.triages:
+            if not self._triage_btn.winfo_ismapped():
+                self._triage_btn.pack(side="left", padx=(0, 5))
+        else:
+            self._triage_btn.pack_forget()
 
     @property
     def chat_panel(self) -> ChatPanel:
