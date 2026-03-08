@@ -85,7 +85,7 @@ class Prompts:
             skill = Prompts._load_skill("address-review")
             if skill:
                 return skill.replace("$ARGUMENTS", pr.url)
-            return f"Address all review comments on PR {pr.url}"
+            return f"Address all review comments on PR {pr.url}. Resolve any comment threads once they are fixed."
 
         lines: list[str] = [
             f"Fix ALL issues on PR #{pr.number} in {org}/{repo} on branch `{pr.branch}`.\n"
@@ -135,7 +135,8 @@ class Prompts:
             f"\n## {step}. Verify & Push\n"
             f"- Build and run tests locally to verify everything works\n"
             f"- git push\n"
-            f"- Wait for CI: gh pr checks {pr.number} --repo {org}/{repo} --watch"
+            f"- Wait for CI: gh pr checks {pr.number} --repo {org}/{repo} --watch\n"
+            f"- Resolve any review comment threads that have been addressed by your changes"
         )
 
         return "".join(lines)
