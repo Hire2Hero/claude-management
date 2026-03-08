@@ -143,7 +143,7 @@ class PRData:
             return PRStatus.CONFLICTS
         if self.has_failing_checks:
             return PRStatus.CI_FAILING
-        if self.review_decision == "CHANGES_REQUESTED" and self.unresolved_thread_count > 0:
+        if self.unresolved_thread_count > 0 or self.review_decision == "CHANGES_REQUESTED":
             return PRStatus.CHANGES_REQUESTED
         if self.all_checks_passed and self.review_decision == "APPROVED":
             return PRStatus.APPROVED
@@ -163,8 +163,8 @@ class PRData:
             problems.append("CI Failing")
         if self.unresolved_thread_count > 0:
             problems.append(f"{self.unresolved_thread_count} Unresolved Comment{'s' if self.unresolved_thread_count != 1 else ''}")
-            if self.review_decision == "CHANGES_REQUESTED":
-                problems.append("Changes Requested")
+        if self.review_decision == "CHANGES_REQUESTED" and self.unresolved_thread_count == 0:
+            problems.append("Changes Requested")
         return problems
 
     @property
@@ -287,7 +287,7 @@ def classify_pr(pr: PRData, tracked: TrackedPR) -> tuple[PRIssueType, PRAction]:
     if pr.has_failing_checks:
         return PRIssueType.CI_FAILING, PRAction.LAUNCH_CLAUDE
 
-    if pr.review_decision == "CHANGES_REQUESTED" and pr.unresolved_thread_count > 0:
+    if pr.unresolved_thread_count > 0:
         return PRIssueType.CHANGES_REQUESTED, PRAction.LAUNCH_CLAUDE
 
     if tracked.ci_was_failing and pr.all_checks_passed and not tracked.slack_sent:

@@ -298,7 +298,13 @@ class TestClassifyPR:
         assert action == PRAction.LAUNCH_CLAUDE
 
     def test_changes_requested_triggers_claude(self):
-        pr = make_pr(review_decision="CHANGES_REQUESTED")
+        pr = make_pr(review_decision="CHANGES_REQUESTED", unresolved_thread_count=2)
+        issue, action = classify_pr(pr, make_tracked())
+        assert issue == PRIssueType.CHANGES_REQUESTED
+        assert action == PRAction.LAUNCH_CLAUDE
+
+    def test_unresolved_threads_triggers_claude_without_changes_requested(self):
+        pr = make_pr(review_decision="REVIEW_REQUIRED", unresolved_thread_count=4)
         issue, action = classify_pr(pr, make_tracked())
         assert issue == PRIssueType.CHANGES_REQUESTED
         assert action == PRAction.LAUNCH_CLAUDE
