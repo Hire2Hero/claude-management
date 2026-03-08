@@ -48,10 +48,6 @@ class SessionTab(ttk.Frame):
                    command=self._on_new_session).pack(side="left", padx=(0, 5))
         ttk.Button(toolbar, text="Start Working a Ticket",
                    command=self._on_start_ticket).pack(side="left", padx=(0, 5))
-        self._remove_btn = ttk.Button(
-            toolbar, text="Remove", command=self._ctx_remove, state="disabled"
-        )
-        self._remove_btn.pack(side="left")
 
         self._count_label = ttk.Label(toolbar, text="0 sessions")
         self._count_label.pack(side="right")
@@ -65,7 +61,7 @@ class SessionTab(ttk.Frame):
         self._paned.add(self._left_frame, weight=1)
         self._left_visible = True
 
-        columns = ("name", "status", "ticket", "pr")
+        columns = ("name", "status", "ticket", "pr", "remove")
         self._tree = ttk.Treeview(
             self._left_frame, columns=columns, show="headings", selectmode="browse"
         )
@@ -74,11 +70,13 @@ class SessionTab(ttk.Frame):
         self._tree.heading("status", text="Status")
         self._tree.heading("ticket", text="Jira Ticket")
         self._tree.heading("pr", text="PR")
+        self._tree.heading("remove", text="")
 
         self._tree.column("name", width=250, minwidth=150)
         self._tree.column("status", width=80, minwidth=60)
         self._tree.column("ticket", width=100, minwidth=60)
         self._tree.column("pr", width=70, minwidth=50, anchor="center")
+        self._tree.column("remove", width=30, minwidth=30, anchor="center", stretch=False)
 
         scrollbar = ttk.Scrollbar(self._left_frame, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=scrollbar.set)
@@ -96,7 +94,7 @@ class SessionTab(ttk.Frame):
         self._tree.bind("<Button-2>", self._on_right_click)
         self._tree.bind("<Button-3>", self._on_right_click)
         self._tree.bind("<Control-Button-1>", self._on_right_click)
-        self._tree.bind("<<TreeviewSelect>>", self._on_selection_change)
+        # Selection change no longer needed (Remove button removed from toolbar)
         self._tree.bind("<Motion>", self._on_motion)
         self._tree.bind("<Leave>", self._on_leave)
 
@@ -144,11 +142,13 @@ class SessionTab(ttk.Frame):
                 tag = "stopped"
                 status_display = "Stopped"
             pr_display = "\U0001F517 Open" if s.pr_url else ""
+            remove_display = "\u2715" if s.status == SessionStatus.STOPPED else ""
             self._tree.insert("", "end", values=(
                 s.name,
                 status_display,
                 s.ticket_id or "",
                 pr_display,
+                remove_display,
             ), tags=(tag,))
 
         total = len(sessions)
@@ -244,22 +244,25 @@ class SessionTab(ttk.Frame):
                 return s
         return None
 
-    def _on_selection_change(self, _event):
-        session = self._get_selected_session()
-        if session and session.status == SessionStatus.STOPPED:
-            self._remove_btn.configure(state="normal")
-        else:
-            self._remove_btn.configure(state="disabled")
-
     def _on_click(self, event):
         col = self._tree.identify_column(event.x)
+        item = self._tree.identify_row(event.y)
+        if not item:
+            return
+        self._tree.selection_set(item)
+        session = self._get_selected_session()
+        if not session:
+            return
         if col == "#4":
-            item = self._tree.identify_row(event.y)
-            if item:
-                self._tree.selection_set(item)
-                session = self._get_selected_session()
-                if session and session.pr_url:
-                    webbrowser.open(session.pr_url)
+            if session.pr_url:
+                webbrowser.open(session.pr_url)
+        elif col == "#5":
+            # Remove column
+            if session.status == SessionStatus.STOPPED:
+                self._ctx_remove()
+        else:
+            # Name or other column — open the panel
+            self._open_panel(session)
 
     def _on_motion(self, event):
         col = self._tree.identify_column(event.x)
@@ -274,18 +277,21 @@ class SessionTab(ttk.Frame):
             if values and values[2]:
                 self._tree.configure(cursor="hand2")
                 return
+        if item and col == "#5":
+            values = self._tree.item(item, "values")
+            if values and values[4]:
+                self._tree.configure(cursor="hand2")
+                return
         self._tree.configure(cursor=self._default_cursor)
 
     def _on_leave(self, _event):
         self._tree.configure(cursor=self._default_cursor)
 
     def _on_double_click(self, event):
-        # Identify which column was clicked
         col = self._tree.identify_column(event.x)
         session = self._get_selected_session()
         if not session:
             return
-
         if col == "#3":
             # Ticket column → open Jira
             if session.ticket_id and self._config.jira_base_url:
@@ -294,11 +300,6 @@ class SessionTab(ttk.Frame):
                     base += "/browse"
                 url = f"{base}/{session.ticket_id}"
                 webbrowser.open(url)
-        elif col == "#4":
-            pass  # Handled by single click
-        else:
-            # Any other column → open chat panel
-            self._open_panel(session)
 
     def _on_right_click(self, event):
         item = self._tree.identify_row(event.y)
