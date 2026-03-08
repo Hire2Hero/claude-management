@@ -20,7 +20,7 @@ STATUS_REVIEWED_BY_CLAUDE = "reviewed_by_claude"
 
 _STATUS_DISPLAY = {
     STATUS_PENDING: "Awaiting Review",
-    STATUS_REVIEWING: "\u23f3 Reviewing...",
+    STATUS_REVIEWING: "\u23f3 Reviewing by Claude",
     STATUS_REVIEWED: "\u2705 Reviewed",
     STATUS_REVIEWED_BY_ME: "\u2705 Reviewed by Me",
     STATUS_REVIEWED_BY_CLAUDE: "\u2705 Reviewed by Claude",

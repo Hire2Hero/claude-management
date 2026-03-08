@@ -6,7 +6,7 @@ import sqlite3
 import threading
 from typing import Optional
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 8
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     cwd         TEXT,
     pr_url      TEXT,
     needs_input INTEGER NOT NULL DEFAULT 0,
-    last_response_at REAL
+    last_response_at REAL,
+    session_type TEXT
 );
 
 CREATE TABLE IF NOT EXISTS tracked_prs (
@@ -44,7 +45,8 @@ CREATE TABLE IF NOT EXISTS pr_reviews (
     repo        TEXT NOT NULL,
     number      INTEGER NOT NULL,
     head_sha    TEXT NOT NULL,
-    reviewed_at REAL NOT NULL
+    reviewed_at REAL NOT NULL,
+    completed   INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS session_history (
@@ -79,6 +81,8 @@ CREATE TABLE IF NOT EXISTS pr_reviews (
     4: "ALTER TABLE sessions ADD COLUMN pr_url TEXT;",
     5: "ALTER TABLE sessions ADD COLUMN needs_input INTEGER NOT NULL DEFAULT 0;",
     6: "ALTER TABLE sessions ADD COLUMN last_response_at REAL;",
+    7: "ALTER TABLE pr_reviews ADD COLUMN completed INTEGER NOT NULL DEFAULT 1;",
+    8: "ALTER TABLE sessions ADD COLUMN session_type TEXT;",
 }
 
 

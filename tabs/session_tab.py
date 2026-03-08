@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import tkinter as tk
 import webbrowser
+from datetime import datetime
 from tkinter import ttk
 from typing import Callable, Optional
 
 from config import Config
-from models import ManagedSession, SessionStatus
+from models import ManagedSession, SessionStatus, SessionType
 from widgets.chat_panel import ChatPanel
 from widgets.summary_panel import SummaryPanel
 
@@ -68,19 +69,23 @@ class SessionTab(ttk.Frame):
         self._paned.add(self._left_frame, weight=1)
         self._left_visible = True
 
-        columns = ("remove", "name", "status", "ticket", "pr")
+        columns = ("remove", "name", "type", "created", "status", "ticket", "pr")
         self._tree = ttk.Treeview(
             self._left_frame, columns=columns, show="headings", selectmode="browse"
         )
 
         self._tree.heading("remove", text="")
         self._tree.heading("name", text="Name")
+        self._tree.heading("type", text="Type")
+        self._tree.heading("created", text="Last Updated")
         self._tree.heading("status", text="Status")
         self._tree.heading("ticket", text="Jira Ticket")
         self._tree.heading("pr", text="PR")
 
         self._tree.column("remove", width=30, minwidth=30, anchor="center", stretch=False)
         self._tree.column("name", width=250, minwidth=150)
+        self._tree.column("type", width=120, minwidth=80)
+        self._tree.column("created", width=130, minwidth=90)
         self._tree.column("status", width=80, minwidth=60)
         self._tree.column("ticket", width=100, minwidth=60)
         self._tree.column("pr", width=70, minwidth=50, anchor="center")
@@ -170,9 +175,21 @@ class SessionTab(ttk.Frame):
                 status_display = "Stopped"
             pr_display = "\U0001F517 Open" if s.pr_url else ""
             remove_display = "\U0001F5D1" if s.status == SessionStatus.STOPPED else ""  # 🗑
+            type_display = ""
+            if s.session_type:
+                try:
+                    type_display = SessionType(s.session_type).display
+                except ValueError:
+                    type_display = s.session_type
+            created_display = ""
+            updated_ts = s.last_response_at or s.created_at
+            if updated_ts:
+                created_display = datetime.fromtimestamp(updated_ts).strftime("%b %d %I:%M %p")
             self._tree.insert("", "end", values=(
                 remove_display,
                 s.name,
+                type_display,
+                created_display,
                 status_display,
                 s.ticket_id or "",
                 pr_display,
@@ -292,14 +309,14 @@ class SessionTab(ttk.Frame):
             # Remove column
             if session.status == SessionStatus.STOPPED:
                 self._ctx_remove()
-        elif col == "#4":
+        elif col == "#6":
             # Ticket column → open Jira
             if session.ticket_id and self._config.jira_base_url:
                 base = self._config.jira_base_url.rstrip("/")
                 if not base.endswith("/browse"):
                     base += "/browse"
                 webbrowser.open(f"{base}/{session.ticket_id}")
-        elif col == "#5":
+        elif col == "#7":
             if session.pr_url:
                 webbrowser.open(session.pr_url)
         else:
@@ -320,9 +337,9 @@ class SessionTab(ttk.Frame):
             elif col == "#2":
                 # Name column — always clickable
                 self._tree.configure(cursor="hand2")
-            elif col == "#4" and values and values[3]:
+            elif col == "#6" and values and values[5]:
                 self._tree.configure(cursor="hand2")
-            elif col == "#5" and values and values[4]:
+            elif col == "#7" and values and values[6]:
                 self._tree.configure(cursor="hand2")
             else:
                 self._tree.configure(cursor=self._default_cursor)

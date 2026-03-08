@@ -58,8 +58,8 @@ class SessionManager:
                 session.ticket_id = extract_ticket_id(session.name)
             self._db.execute(
                 "INSERT OR REPLACE INTO sessions "
-                "(name, repo, pid, session_id, status, created_at, ticket_id, cwd, pr_url, needs_input, last_response_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "(name, repo, pid, session_id, status, created_at, ticket_id, cwd, pr_url, needs_input, last_response_at, session_type) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     session.name,
                     session.repo,
@@ -72,6 +72,7 @@ class SessionManager:
                     session.pr_url,
                     int(session.needs_input),
                     session.last_response_at,
+                    session.session_type,
                 ),
             )
         log.info("Registered session: %s (repo=%s, pid=%s)", session.name, session.repo, session.pid)
@@ -132,6 +133,7 @@ class SessionManager:
                     pr_url=r["pr_url"],
                     needs_input=bool(r["needs_input"]),
                     last_response_at=r["last_response_at"],
+                    session_type=r["session_type"],
                 )
                 for r in rows
             ]

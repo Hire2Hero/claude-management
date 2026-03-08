@@ -92,7 +92,7 @@ from config import Config, DEFAULTS_PATH
 from database import Database
 from github_client import GitHubClient
 from history import SessionHistoryStore
-from models import ManagedSession, PRData, SessionStatus, extract_ticket_id
+from models import ManagedSession, PRData, SessionStatus, SessionType, extract_ticket_id
 from pr_monitor import PRMonitorThread, Prompts
 from session_manager import SessionManager
 from summary_logger import SummaryLogger
@@ -161,6 +161,8 @@ class Application:
         self._summary_text_buf: dict[str, str] = {}
         # PR Review tab state
         self._review_statuses: dict[str, str] = {}
+        # Pending review info: session_name -> (key, repo, number, head_sha)
+        self._pending_reviews: dict[str, tuple[str, str, int, str]] = {}
         # Sessions waiting for user input
         self._needs_attention: set[str] = set()
         # Active skill runners keyed by session name
@@ -417,7 +419,7 @@ class Application:
         settings_menu.add_command(label="Organization & Repos...", command=lambda: self._edit_setup_step("org_repos"))
         settings_menu.add_command(label="Skill Workflows...", command=lambda: self._edit_setup_step("skills"))
         settings_menu.add_command(label="Jira...", command=lambda: self._edit_setup_step("jira"))
-        settings_menu.add_command(label="Slack Webhook...", command=lambda: self._edit_setup_step("slack"))
+        settings_menu.add_command(label="Slack...", command=lambda: self._edit_setup_step("slack"))
         file_menu.add_cascade(label="Settings", menu=settings_menu)
         file_menu.add_command(label="Re-run Full Setup...", command=self._rerun_setup)
         file_menu.add_separator()
@@ -470,6 +472,8 @@ class Application:
             self.config.jira_board_name = new.jira_board_name
         elif step_name == "slack":
             self.config.slack_webhook_url = new.slack_webhook_url
+            self.config.slack_mode = new.slack_mode
+            self.config.slack_channel = new.slack_channel
         self.config.save(CONFIG_PATH)
         # Reinitialize services for steps that affect them
         if step_name in ("org_repos", "base_dir"):
@@ -587,7 +591,7 @@ class Application:
         self._gear_menu.add_command(label="Edit Repos...", command=lambda: self._edit_setup_step("org_repos"))
         self._gear_menu.add_command(label="Skill Workflows...", command=lambda: self._edit_setup_step("skills"))
         self._gear_menu.add_command(label="Jira...", command=lambda: self._edit_setup_step("jira"))
-        self._gear_menu.add_command(label="Slack Webhook...", command=lambda: self._edit_setup_step("slack"))
+        self._gear_menu.add_command(label="Slack...", command=lambda: self._edit_setup_step("slack"))
         self._gear_menu.add_separator()
         self._gear_menu.add_command(label="Re-run Full Setup...", command=self._rerun_setup)
 
@@ -982,6 +986,17 @@ class Application:
                     self.session_mgr.register_session(s)
                     break
 
+        # Complete any pending PR review for this session
+        pending = self._pending_reviews.pop(name, None)
+        if pending:
+            pr_key, pr_repo, pr_number, pr_head_sha = pending
+            self._db.execute(
+                "UPDATE pr_reviews SET completed = 1, reviewed_at = ? WHERE key = ?",
+                (time.time(), pr_key),
+            )
+            self._review_statuses[pr_key] = STATUS_REVIEWED_BY_CLAUDE
+            self.pr_review_tab.update_review_status(pr_repo, pr_number, STATUS_REVIEWED_BY_CLAUDE)
+
         status = "exited" if returncode == 0 else f"exited (code {returncode})"
         exit_text = f"\n--- Process {status} ---\n"
         self._history_store.append(name, "system", exit_text)
@@ -1261,6 +1276,8 @@ class Application:
             session = existing
             session.cwd = session.cwd or self.config.base_dir
             session.pr_url = session.pr_url or pr.url
+            session.session_type = SessionType.FIX_BUILD.value
+            self.session_mgr.register_session(session)
         else:
             name = f"Fix {pr.repo}#{pr.number}"
             if ticket_id:
@@ -1275,6 +1292,7 @@ class Application:
                 cwd=self.config.base_dir,
                 session_id=self.session_mgr.find_claude_session(pr.repo, ticket_id),
                 pr_url=pr.url,
+                session_type=SessionType.FIX_BUILD.value,
             )
             self.session_mgr.register_session(session)
 
@@ -1325,6 +1343,7 @@ class Application:
             created_at=time.time(),
             ticket_id=extract_ticket_id(name),
             cwd=self.config.base_dir,
+            session_type=SessionType.WORKING_NEW_SESSION.value,
         )
         self.session_mgr.register_session(session)
 
@@ -1390,6 +1409,7 @@ class Application:
             created_at=time.time(),
             ticket_id=ticket_id,
             cwd=self.config.base_dir,
+            session_type=SessionType.WORKING_TICKET.value,
         )
         self.session_mgr.register_session(session)
 
@@ -1424,6 +1444,7 @@ class Application:
             created_at=time.time(),
             ticket_id="",
             cwd=self.config.base_dir,
+            session_type=SessionType.WORKING_TRIAGE.value,
         )
         self.session_mgr.register_session(session)
 
@@ -1434,9 +1455,15 @@ class Application:
 
     def _handle_send_for_review(self, pr: PRData):
         """Remove draft status if needed, then send a Slack review request."""
+        slack_mode = self.config.slack_mode
         webhook_url = self.config.slack_webhook_url
-        if not webhook_url:
+        slack_channel = self.config.slack_channel
+
+        if slack_mode == "webhook" and not webhook_url:
             messagebox.showwarning("Slack", "No Slack webhook configured. Run setup to add one.")
+            return
+        if slack_mode == "mcp" and not slack_channel:
+            messagebox.showwarning("Slack", "No Slack channel configured. Run setup to add one.")
             return
 
         ticket_id = pr.ticket_id
@@ -1453,10 +1480,18 @@ class Application:
         gh = self.gh
 
         def _do():
-            from slack_client import send_webhook
             if is_draft:
                 gh.mark_ready_for_review(pr.repo, pr.number)
-            ok = send_webhook(webhook_url, msg, unfurl_links=False)
+            if slack_mode == "mcp":
+                from slack_client import send_via_mcp
+                ok = send_via_mcp(
+                    slack_channel, msg,
+                    oauth_token=self.config.claude_oauth_token,
+                    cwd=self.config.base_dir,
+                )
+            else:
+                from slack_client import send_webhook
+                ok = send_webhook(webhook_url, msg, unfurl_links=False)
             self.ui_queue.put(("slack_review_result", (pr, ok, is_draft)))
 
         threading.Thread(target=_do, daemon=True).start()
@@ -1501,9 +1536,16 @@ class Application:
                 if pr.author != current_user
             ]
 
-            # Load local review records (Claude reviews)
-            review_rows = self._db.fetchall("SELECT key, head_sha FROM pr_reviews")
-            local_reviews = {r["key"]: r["head_sha"] for r in review_rows}
+            # Load local review records (only completed Claude reviews)
+            review_rows = self._db.fetchall(
+                "SELECT key, head_sha, completed FROM pr_reviews"
+            )
+            local_reviews = {
+                r["key"]: r["head_sha"] for r in review_rows if r["completed"]
+            }
+            in_progress_reviews = {
+                r["key"] for r in review_rows if not r["completed"]
+            }
 
             statuses = dict(self._review_statuses)
             for pr in team_prs:
@@ -1532,7 +1574,7 @@ class Application:
 
         # Check if already reviewed at this commit
         existing = self._db.fetchone(
-            "SELECT head_sha FROM pr_reviews WHERE key = ?", (key,)
+            "SELECT head_sha FROM pr_reviews WHERE key = ? AND completed = 1", (key,)
         )
         if existing and existing["head_sha"] == pr.head_sha and pr.head_sha:
             proceed = messagebox.askyesno(
@@ -1575,6 +1617,7 @@ class Application:
             ticket_id=pr.ticket_id,
             cwd=self.config.base_dir,
             pr_url=pr.url,
+            session_type=SessionType.REVIEWING.value,
         )
         self.session_mgr.register_session(session)
 
@@ -1587,14 +1630,13 @@ class Application:
         self._start_claude_process(session, initial_prompt=prompt)
         self.session_tab.update_sessions(self.session_mgr.get_all_sessions(), self._needs_attention)
 
-        # Store review locally
+        # Store review as in-progress; completed flag set when session stops
+        self._pending_reviews[name] = (key, pr.repo, pr.number, pr.head_sha)
         self._db.execute(
-            "INSERT OR REPLACE INTO pr_reviews (key, repo, number, head_sha, reviewed_at) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO pr_reviews (key, repo, number, head_sha, reviewed_at, completed) "
+            "VALUES (?, ?, ?, ?, ?, 0)",
             (key, pr.repo, pr.number, pr.head_sha, time.time()),
         )
-        self._review_statuses[key] = STATUS_REVIEWED_BY_CLAUDE
-        self.pr_review_tab.update_review_status(pr.repo, pr.number, STATUS_REVIEWED_BY_CLAUDE)
 
     def _handle_run_review_all(self, prs: list[PRData]):
         for pr in prs:

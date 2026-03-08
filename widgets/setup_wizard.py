@@ -39,6 +39,8 @@ class SetupWizard(tk.Toplevel):
             jira_board_id=bootstrap.jira_board_id,
             jira_board_name=bootstrap.jira_board_name,
             slack_webhook_url=bootstrap.slack_webhook_url,
+            slack_mode=bootstrap.slack_mode,
+            slack_channel=bootstrap.slack_channel,
             base_dir=bootstrap.base_dir,
             claude_projects_dir=bootstrap.claude_projects_dir,
             claude_oauth_token=bootstrap.claude_oauth_token,
@@ -218,18 +220,27 @@ class SetupWizard(tk.Toplevel):
                 )
                 return False
         elif self._step == 5:
-            url = self._slack_webhook_var.get().strip()
-            if not url:
-                messagebox.showwarning("Validation", "Webhook URL is required.", parent=self)
-                return False
-            if not self._slack_verified:
-                messagebox.showwarning(
-                    "Validation",
-                    "Please send a test message and enter the verification code.",
-                    parent=self,
-                )
-                return False
-            self._config.slack_webhook_url = url
+            mode = self._slack_mode_var.get()
+            self._config.slack_mode = mode
+            if mode == "webhook":
+                url = self._slack_webhook_var.get().strip()
+                if not url:
+                    messagebox.showwarning("Validation", "Webhook URL is required.", parent=self)
+                    return False
+                if not self._slack_verified:
+                    messagebox.showwarning(
+                        "Validation",
+                        "Please send a test message and enter the verification code.",
+                        parent=self,
+                    )
+                    return False
+                self._config.slack_webhook_url = url
+            else:  # mcp
+                channel = self._slack_channel_var.get().strip()
+                if not channel:
+                    messagebox.showwarning("Validation", "Slack channel name is required.", parent=self)
+                    return False
+                self._config.slack_channel = channel
         return True
 
     def _finish(self):
@@ -792,13 +803,30 @@ class SetupWizard(tk.Toplevel):
     # ── Step 4: Slack Webhook ────────────────────────────────────────────────
 
     def _build_step_slack(self):
-        ttk.Label(self._container, text="Slack Webhook",
+        ttk.Label(self._container, text="Slack Notifications",
                   font=("TkDefaultFont", 16, "bold")).pack(anchor="w", pady=(0, 5))
         ttk.Label(self._container,
-                  text="Set up an Incoming Webhook so the app can post PR notifications.",
+                  text="Choose how the app sends PR notifications to Slack.",
                   wraplength=500).pack(anchor="w", pady=(0, 8))
 
-        # Instructions
+        # Mode selection
+        mode_frame = ttk.Frame(self._container)
+        mode_frame.pack(anchor="w", fill="x", pady=(0, 8))
+        self._slack_mode_var = tk.StringVar(value=self._config.slack_mode)
+        ttk.Radiobutton(
+            mode_frame, text="Incoming Webhook (direct)",
+            variable=self._slack_mode_var, value="webhook",
+            command=self._toggle_slack_mode,
+        ).pack(anchor="w")
+        ttk.Radiobutton(
+            mode_frame, text="Claude MCP (sends via Claude's Slack MCP tool)",
+            variable=self._slack_mode_var, value="mcp",
+            command=self._toggle_slack_mode,
+        ).pack(anchor="w")
+
+        # ── Webhook panel ──
+        self._slack_webhook_panel = ttk.Frame(self._container)
+
         steps = [
             ('Create a new Slack app — choose "From scratch", pick a name and workspace:',
              "Create Slack App (api.slack.com)",
@@ -809,7 +837,7 @@ class SetupWizard(tk.Toplevel):
              None, None),
         ]
         for i, (text, btn_text, btn_url) in enumerate(steps, 1):
-            row = ttk.Frame(self._container)
+            row = ttk.Frame(self._slack_webhook_panel)
             row.pack(anchor="w", fill="x", pady=(0, 4))
             ttk.Label(row, text=f"{i}.").pack(side="left", anchor="n")
             col = ttk.Frame(row)
@@ -820,30 +848,25 @@ class SetupWizard(tk.Toplevel):
                 ttk.Button(col, text=btn_text,
                            command=lambda u=url: webbrowser.open(u)).pack(anchor="w", pady=(2, 0))
 
-        # Webhook URL entry
-        ttk.Label(self._container, text="Webhook URL:").pack(anchor="w", pady=(10, 0))
+        ttk.Label(self._slack_webhook_panel, text="Webhook URL:").pack(anchor="w", pady=(10, 0))
         self._slack_webhook_var = tk.StringVar(value=self._config.slack_webhook_url)
-        webhook_entry = ttk.Entry(self._container, textvariable=self._slack_webhook_var, width=60)
+        webhook_entry = ttk.Entry(self._slack_webhook_panel, textvariable=self._slack_webhook_var, width=60)
         webhook_entry.pack(anchor="w", pady=(0, 5))
-        webhook_entry.focus_set()
-        ttk.Label(self._container,
+        ttk.Label(self._slack_webhook_panel,
                   text="Example: https://hooks.slack.com/services/T.../B.../xxx",
                   foreground="gray").pack(anchor="w", pady=(0, 8))
 
-        # Send Test button
-        test_frame = ttk.Frame(self._container)
+        test_frame = ttk.Frame(self._slack_webhook_panel)
         test_frame.pack(anchor="w", fill="x", pady=(0, 5))
         self._slack_test_btn = ttk.Button(test_frame, text="Send Test Message",
                                           command=self._send_slack_test)
         self._slack_test_btn.pack(side="left")
         self._slack_test_progress = ttk.Progressbar(test_frame, mode="indeterminate", length=120)
 
-        self._slack_test_label = ttk.Label(self._container, text="")
+        self._slack_test_label = ttk.Label(self._slack_webhook_panel, text="")
         self._slack_test_label.pack(anchor="w", pady=(3, 0))
 
-        # Verification code entry (hidden until test sent)
-        self._slack_verify_frame = ttk.Frame(self._container)
-        # Don't pack yet
+        self._slack_verify_frame = ttk.Frame(self._slack_webhook_panel)
         ttk.Label(self._slack_verify_frame,
                   text="Enter the verification code from the Slack message:").pack(anchor="w")
         verify_row = ttk.Frame(self._slack_verify_frame)
@@ -855,9 +878,35 @@ class SetupWizard(tk.Toplevel):
         self._slack_verify_label = ttk.Label(self._slack_verify_frame, text="")
         self._slack_verify_label.pack(anchor="w", pady=(3, 0))
 
-        # If already verified from a previous visit, show status
         if self._slack_verified:
             self._slack_test_label.configure(text="Webhook verified.", foreground="green")
+
+        # ── MCP panel ──
+        self._slack_mcp_panel = ttk.Frame(self._container)
+        ttk.Label(self._slack_mcp_panel,
+                  text="Claude will send Slack messages using its MCP Slack integration.\n"
+                       "Make sure the Slack MCP server is configured in your Claude settings.",
+                  wraplength=500).pack(anchor="w", pady=(0, 8))
+
+        ttk.Label(self._slack_mcp_panel, text="Channel name:").pack(anchor="w", pady=(5, 0))
+        self._slack_channel_var = tk.StringVar(value=self._config.slack_channel)
+        ttk.Entry(self._slack_mcp_panel, textvariable=self._slack_channel_var, width=40).pack(
+            anchor="w", pady=(0, 5))
+        ttk.Label(self._slack_mcp_panel,
+                  text="Example: #dev-prs or #general",
+                  foreground="gray").pack(anchor="w")
+
+        # Show the right panel
+        self._toggle_slack_mode()
+
+    def _toggle_slack_mode(self):
+        mode = self._slack_mode_var.get()
+        if mode == "webhook":
+            self._slack_mcp_panel.pack_forget()
+            self._slack_webhook_panel.pack(anchor="w", fill="x", pady=(5, 0))
+        else:
+            self._slack_webhook_panel.pack_forget()
+            self._slack_mcp_panel.pack(anchor="w", fill="x", pady=(5, 0))
 
     def _send_slack_test(self):
         url = self._slack_webhook_var.get().strip()
@@ -930,7 +979,7 @@ class SingleStepSetupDialog(SetupWizard):
         "org_repos": "Organization & Repos",
         "skills": "Skill Workflows",
         "jira": "Jira Configuration",
-        "slack": "Slack Webhook",
+        "slack": "Slack Notifications",
     }
 
     def __init__(self, parent: tk.Tk, bootstrap: Config, step_name: str):
@@ -953,6 +1002,8 @@ class SingleStepSetupDialog(SetupWizard):
             jira_board_id=bootstrap.jira_board_id,
             jira_board_name=bootstrap.jira_board_name,
             slack_webhook_url=bootstrap.slack_webhook_url,
+            slack_mode=bootstrap.slack_mode,
+            slack_channel=bootstrap.slack_channel,
             base_dir=bootstrap.base_dir,
             claude_projects_dir=bootstrap.claude_projects_dir,
             claude_oauth_token=bootstrap.claude_oauth_token,

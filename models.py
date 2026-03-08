@@ -42,6 +42,27 @@ class SessionStatus(Enum):
     STOPPED = "stopped"
 
 
+class SessionType(Enum):
+    FIX_BUILD = "fix_build"
+    REVIEWING = "reviewing"
+    WORKING_TICKET = "working_ticket"
+    WORKING_TRIAGE = "working_triage"
+    WORKING_NEW_SESSION = "working_new_session"
+
+    @property
+    def display(self) -> str:
+        return _SESSION_TYPE_DISPLAY[self]
+
+
+_SESSION_TYPE_DISPLAY = {
+    SessionType.FIX_BUILD: "Fix Build",
+    SessionType.REVIEWING: "Reviewing",
+    SessionType.WORKING_TICKET: "Working Jira Ticket",
+    SessionType.WORKING_TRIAGE: "Working Triage",
+    SessionType.WORKING_NEW_SESSION: "Working New Session",
+}
+
+
 # ──────────────────────────── PR Data Classes ────────────────────────────────
 
 IGNORED_CHECKS = {
@@ -210,6 +231,7 @@ class ManagedSession:
     pr_url: Optional[str] = None
     needs_input: bool = False
     last_response_at: Optional[float] = None
+    session_type: Optional[str] = None
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -230,6 +252,7 @@ class ManagedSession:
             pr_url=d.get("pr_url"),
             needs_input=d.get("needs_input", False),
             last_response_at=d.get("last_response_at"),
+            session_type=d.get("session_type"),
         )
 
 

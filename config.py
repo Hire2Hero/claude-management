@@ -86,6 +86,8 @@ class Config:
     jira_board_id: int = 0
     jira_board_name: str = ""
     slack_webhook_url: str = ""
+    slack_mode: str = "webhook"  # "webhook" or "mcp"
+    slack_channel: str = ""
     base_dir: str = DEFAULT_BASE_DIR
     claude_projects_dir: str = DEFAULT_CLAUDE_PROJECTS_DIR
     poll_interval: int = 300
@@ -116,6 +118,8 @@ class Config:
                 jira_board_id=data.get("jira_board_id", 0),
                 jira_board_name=data.get("jira_board_name", ""),
                 slack_webhook_url=data.get("slack_webhook_url", ""),
+                slack_mode=data.get("slack_mode", "webhook"),
+                slack_channel=data.get("slack_channel", ""),
                 base_dir=data.get("base_dir", DEFAULT_BASE_DIR),
                 claude_projects_dir=data.get("claude_projects_dir", DEFAULT_CLAUDE_PROJECTS_DIR),
                 claude_oauth_token=data.get("claude_oauth_token", ""),

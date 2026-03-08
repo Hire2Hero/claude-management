@@ -313,14 +313,21 @@ class PRMonitorThread(threading.Thread):
             tracked.last_action_time = time.time()
 
         elif action == PRAction.SEND_SLACK:
-            webhook_url = self.config.slack_webhook_url
-            if webhook_url:
+            msg = f"PR {pr.url} ({pr.repo}#{pr.number}) — CI is now passing. Ready for review."
+            slack_mode = self.config.slack_mode
+            if slack_mode == "mcp" and self.config.slack_channel:
+                from slack_client import send_via_mcp
+                success = send_via_mcp(
+                    self.config.slack_channel, msg,
+                    oauth_token=self.config.claude_oauth_token,
+                    cwd=self.config.base_dir,
+                )
+            elif self.config.slack_webhook_url:
                 from slack_client import send_webhook
-                msg = f"PR {pr.url} ({pr.repo}#{pr.number}) — CI is now passing. Ready for review."
-                success = send_webhook(webhook_url, msg)
+                success = send_webhook(self.config.slack_webhook_url, msg)
             else:
                 success = False
-                log.warning("No Slack webhook configured, skipping notification for %s#%d",
+                log.warning("No Slack configuration found, skipping notification for %s#%d",
                             pr.repo, pr.number)
             if success:
                 tracked.slack_sent = True

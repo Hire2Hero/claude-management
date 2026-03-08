@@ -50,6 +50,8 @@ class PRTab(ttk.Frame):
     _REVIEW_ICON = "\U0001f4ac Review"  # 💬 Review
     _MERGE_ICON = "\U0001f680 Merge"   # 🚀 Merge
     _DRAFT_ICON = "\U0001F4DD"         # 📝
+    _WATCH_ON = "\U0001f441"           # 👁
+    _WATCH_OFF = "\u25cb"              # ○
 
     def _build_toolbar(self):
         toolbar = ttk.Frame(self)
@@ -71,10 +73,11 @@ class PRTab(ttk.Frame):
         self._monitor_label.pack(side="right")
 
     def _build_table(self):
-        columns = ("action", "repo", "number", "title", "branch", "draft", "status", "url")
+        columns = ("action", "watch", "repo", "number", "title", "branch", "draft", "status", "url")
         self._tree = ttk.Treeview(self, columns=columns, show="headings", selectmode="browse")
 
         self._tree.heading("action", text="")
+        self._tree.heading("watch", text="Monitor")
         self._tree.heading("repo", text="Repo")
         self._tree.heading("number", text="PR #")
         self._tree.heading("title", text="Title")
@@ -84,6 +87,7 @@ class PRTab(ttk.Frame):
         self._tree.heading("url", text="URL")
 
         self._tree.column("action", width=90, minwidth=70, anchor="center")
+        self._tree.column("watch", width=60, minwidth=40, anchor="center", stretch=False)
         self._tree.column("repo", width=130, minwidth=80)
         self._tree.column("number", width=60, minwidth=50)
         self._tree.column("title", width=300, minwidth=150)
@@ -174,7 +178,7 @@ class PRTab(ttk.Frame):
         sel = self._tree.selection()
         if sel:
             vals = self._tree.item(sel[0], "values")
-            selected_key = (vals[1], vals[2])  # (repo, #number)
+            selected_key = (vals[2], vals[3])  # (repo, #number)
 
         self._prs = prs
         self._tree.delete(*self._tree.get_children())
@@ -190,11 +194,11 @@ class PRTab(ttk.Frame):
                 action_text = self._REVIEW_ICON
             else:
                 action_text = ""  # Pending — no action yet
-            if key in self._watched_keys:
-                action_text = "\U0001f441 " + action_text  # 👁 prefix
+            watch_icon = self._WATCH_ON if key in self._watched_keys else self._WATCH_OFF
             draft_icon = self._DRAFT_ICON if pr.is_draft else ""
             self._tree.insert("", "end", values=(
                 action_text,
+                watch_icon,
                 pr.repo,
                 f"#{pr.number}",
                 pr.title,
@@ -208,7 +212,7 @@ class PRTab(ttk.Frame):
         if selected_key:
             for item in self._tree.get_children():
                 vals = self._tree.item(item, "values")
-                if (vals[1], vals[2]) == selected_key:
+                if (vals[2], vals[3]) == selected_key:
                     self._tree.selection_set(item)
                     self._tree.focus(item)
                     break
@@ -224,20 +228,28 @@ class PRTab(ttk.Frame):
         if not sel:
             return None
         values = self._tree.item(sel[0], "values")
-        repo = values[1]       # action is [0], repo is [1]
-        number = int(values[2].lstrip("#"))  # number is [2]
+        repo = values[2]       # action [0], watch [1], repo [2]
+        number = int(values[3].lstrip("#"))  # number is [3]
         for pr in self._prs:
             if pr.repo == repo and pr.number == number:
                 return pr
         return None
 
     def _on_click(self, event):
-        """Single-click handler — triggers action column buttons."""
+        """Single-click handler — triggers action and watch column buttons."""
         col = self._tree.identify_column(event.x)
-        if col != "#1":  # action column
-            return
         item = self._tree.identify_row(event.y)
         if not item:
+            return
+        if col == "#2":
+            # Watch column — toggle monitoring
+            self._tree.selection_set(item)
+            pr = self._get_selected_pr()
+            if pr and self._on_watch:
+                key = f"{pr.repo}#{pr.number}"
+                self._on_watch(pr, key not in self._watched_keys)
+            return
+        if col != "#1":  # action column
             return
         self._tree.selection_set(item)
         pr = self._get_selected_pr()
@@ -276,10 +288,17 @@ class PRTab(ttk.Frame):
                         tip = "Send to Claude to fix issues"
                     elif self._REVIEW_ICON in action_text:
                         tip = "Send Slack message for review"
-            elif col == "#5" and values:
+            elif col == "#2":
                 self._tree.configure(cursor="hand2")
+                key = f"{values[2]}#{values[3].lstrip('#')}" if values else ""
+                if key and key in self._watched_keys:
+                    tip = "Stop monitoring this PR"
+                else:
+                    tip = "Monitor and auto-fix this PR"
             elif col == "#6" and values:
-                if values[5] == self._DRAFT_ICON:
+                self._tree.configure(cursor="hand2")
+            elif col == "#7" and values:
+                if values[6] == self._DRAFT_ICON:
                     tip = "Draft"
 
         if tip:
@@ -294,7 +313,7 @@ class PRTab(ttk.Frame):
                                 y=y - self.winfo_toplevel().winfo_rooty())
             return
 
-        if col not in ("#1", "#5"):
+        if col not in ("#1", "#2", "#6"):
             self._tree.configure(cursor=self._default_cursor)
         self._tooltip.place_forget()
 
