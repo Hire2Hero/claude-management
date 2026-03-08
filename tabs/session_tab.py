@@ -26,6 +26,7 @@ class SessionTab(ttk.Frame):
         on_stop_session: Callable[[str], None],
         on_triage: Callable = lambda: None,
         on_remove_session: Callable[[str], None] = lambda name: None,
+        on_restart_session: Callable[[str], None] = lambda name: None,
     ):
         super().__init__(parent)
         self._config = config
@@ -36,6 +37,7 @@ class SessionTab(ttk.Frame):
         self._on_send_message = on_send_message
         self._on_stop_session = on_stop_session
         self._on_remove_session = on_remove_session
+        self._on_restart_session = on_restart_session
         self._sessions: list[ManagedSession] = []
         self._active_session_name: Optional[str] = None
         self._summary_visible = False
@@ -117,6 +119,7 @@ class SessionTab(ttk.Frame):
         )
 
         self._ctx_menu = tk.Menu(self, tearoff=0)
+        self._ctx_menu.add_command(label="Restart (Fresh Plugins)", command=self._ctx_restart)
         self._ctx_menu.add_command(label="Remove Session", command=self._ctx_remove)
 
         # ── Right pane: vertical container (chat + summary) ───────────────
@@ -161,7 +164,7 @@ class SessionTab(ttk.Frame):
         self._tree.delete(*self._tree.get_children())
 
         running_count = 0
-        for s in sorted(sessions, key=lambda s: s.created_at, reverse=True):
+        for s in sorted(sessions, key=lambda s: s.last_response_at or s.created_at, reverse=True):
             if s.status == SessionStatus.RUNNING:
                 running_count += 1
             if s.name in attention_names:
@@ -373,10 +376,17 @@ class SessionTab(ttk.Frame):
         session = self._get_selected_session()
         if not session:
             return
-        # Only allow removing stopped sessions
+        # Only allow restart/remove on stopped sessions
         state = "normal" if session.status == SessionStatus.STOPPED else "disabled"
-        self._ctx_menu.entryconfigure(0, state=state)
+        self._ctx_menu.entryconfigure(0, state=state)  # Restart
+        self._ctx_menu.entryconfigure(1, state=state)  # Remove
         self._ctx_menu.tk_popup(event.x_root, event.y_root)
+
+    def _ctx_restart(self):
+        session = self._get_selected_session()
+        if not session or session.status != SessionStatus.STOPPED:
+            return
+        self._on_restart_session(session.name)
 
     def _ctx_remove(self):
         from tkinter import messagebox

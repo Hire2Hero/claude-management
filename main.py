@@ -556,6 +556,7 @@ class Application:
             on_send_message=self._handle_send_message,
             on_stop_session=self._handle_stop_session,
             on_remove_session=self._handle_remove_session,
+            on_restart_session=self._handle_restart_session,
         )
         self._notebook.add(self.session_tab, text="Working Sessions")
 
@@ -645,21 +646,12 @@ class Application:
                     existing = self._find_session_for_pr(pr)
                     if existing and existing.name in self._claude_processes and self._claude_processes[existing.name].is_alive:
                         if existing.name in self._needs_attention:
-                            # Only send if no other session is actively running
-                            other_active = any(
-                                n != existing.name and p.is_alive and n not in self._needs_attention
-                                for n, p in self._claude_processes.items()
-                            )
-                            if other_active:
-                                log.info("Auto-fix deferred for %s#%d — another session is actively running",
-                                         pr.repo, pr.number)
-                            else:
-                                # Session waiting for input — send new fix prompt
-                                log.info("Auto-fix: sending fix prompt to waiting session %s for %s#%d",
-                                         existing.name, pr.repo, pr.number)
-                                prompt = Prompts.fix_all(self.config.org, pr.repo, pr)
-                                prompt += WORKTREE_INSTRUCTIONS + SUMMARY_INSTRUCTIONS
-                                self._handle_send_message(existing.name, prompt)
+                            # Session waiting for input — send new fix prompt
+                            log.info("Auto-fix: sending fix prompt to waiting session %s for %s#%d",
+                                     existing.name, pr.repo, pr.number)
+                            prompt = Prompts.fix_all(self.config.org, pr.repo, pr)
+                            prompt += WORKTREE_INSTRUCTIONS + SUMMARY_INSTRUCTIONS
+                            self._handle_send_message(existing.name, prompt)
                         else:
                             # Session actively processing — skip
                             log.info("Auto-fix skipped for %s#%d — Claude actively running in session %s",
@@ -1192,6 +1184,51 @@ class Application:
             self.session_mgr.unregister_session(name)
             sessions = self.session_mgr.get_all_sessions()
             self.session_tab.update_sessions(sessions, self._needs_attention)
+
+    def _handle_restart_session(self, name: str):
+        """Restart a stopped session with a fresh Claude session (reloads plugins).
+
+        Clears session_id so Claude picks up updated skills/plugins, but
+        injects the session summary as context so Claude knows what was
+        being worked on.
+        """
+        session = self._find_session_by_name(name)
+        if not session:
+            return
+
+        # Build context from session summary + recent chat history
+        context_parts: list[str] = []
+
+        summary = self._summary_logger.get_content(name)
+        if summary:
+            context_parts.append(
+                "## Previous Session Summary\n"
+                "This session is being restarted to reload updated plugins/skills. "
+                "Here is a summary of what was accomplished so far:\n\n"
+                f"{summary}"
+            )
+
+        history = self._history_store.get(name)
+        if history:
+            # Include last ~20 entries for immediate context
+            recent = history[-20:]
+            history_text = "\n".join(
+                f"[{tag}] {text.strip()}" for tag, text in recent if text.strip()
+            )
+            if history_text:
+                context_parts.append(
+                    "## Recent Chat History\n" + history_text
+                )
+
+        prompt = "Continue working on this session."
+        if context_parts:
+            prompt = "\n\n".join(context_parts) + "\n\nContinue where you left off."
+
+        # Clear session_id so Claude starts fresh and picks up updated plugins
+        session.session_id = None
+        self.session_mgr.register_session(session)
+        log.info("Restarting session %s with fresh plugins (cleared session_id)", name)
+        self._start_claude_process(session, initial_prompt=prompt)
 
     # ── Action Handlers ──────────────────────────────────────────────────────
 
