@@ -19,7 +19,7 @@ STATUS_REVIEWED_BY_ME = "reviewed_by_me"
 STATUS_REVIEWED_BY_CLAUDE = "reviewed_by_claude"
 
 _STATUS_DISPLAY = {
-    STATUS_PENDING: "Pending",
+    STATUS_PENDING: "Awaiting Review",
     STATUS_REVIEWING: "\u23f3 Reviewing...",
     STATUS_REVIEWED: "\u2705 Reviewed",
     STATUS_REVIEWED_BY_ME: "\u2705 Reviewed by Me",
@@ -199,7 +199,7 @@ class PRReviewTab(ttk.Frame):
         total = len(self._prs)
         shown = len(visible_prs)
         hidden = total - shown
-        count_text = f"{shown} PRs ({reviewable} pending review)"
+        count_text = f"{shown} PRs ({reviewable} awaiting review)"
         if hidden:
             count_text += f" — {hidden} draft hidden"
         self._count_label.configure(text=count_text)
@@ -236,7 +236,7 @@ class PRReviewTab(ttk.Frame):
             1 for pr in self._prs
             if self._review_statuses.get(f"{pr.repo}#{pr.number}", STATUS_PENDING) == STATUS_PENDING
         )
-        self._count_label.configure(text=f"{len(self._prs)} PRs ({reviewable} pending review)")
+        self._count_label.configure(text=f"{len(self._prs)} PRs ({reviewable} awaiting review)")
 
     # ── Private ───────────────────────────────────────────────────────────
 

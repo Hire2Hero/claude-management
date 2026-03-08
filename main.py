@@ -1138,6 +1138,18 @@ class Application:
 
         # If a Claude process is already running for this PR, handle it
         if existing and existing.name in self._claude_processes and self._claude_processes[existing.name].is_alive:
+            if existing.name in self._needs_attention:
+                # Session waiting for input — send fix prompt to existing session
+                log.info("Sending fix prompt to waiting session %s for %s#%d",
+                         existing.name, pr.repo, pr.number)
+                fix_prompt = prompt + WORKTREE_INSTRUCTIONS + SUMMARY_INSTRUCTIONS if prompt else None
+                if fix_prompt:
+                    self._handle_send_message(existing.name, fix_prompt)
+                if not silent:
+                    self._notebook.select(self.session_tab)
+                    self.session_tab.update_sessions(self.session_mgr.get_all_sessions(), self._needs_attention)
+                    self.session_tab.select_and_open_session(existing)
+                return
             if silent:
                 log.info("Fix skipped for %s#%d — Claude already running in session %s",
                          pr.repo, pr.number, existing.name)
