@@ -182,12 +182,12 @@ class PRTab(ttk.Frame):
         for pr in sorted(prs, key=lambda p: (p.repo, p.number)):
             tag = pr.status.value
             key = f"{pr.repo}#{pr.number}"
-            if pr.status == PRStatus.APPROVED:
+            if pr.issues:
+                action_text = self._FIX_ICON
+            elif pr.status == PRStatus.APPROVED:
                 action_text = self._MERGE_ICON
             elif pr.is_ready_for_review:
                 action_text = self._REVIEW_ICON
-            elif pr.issues:
-                action_text = self._FIX_ICON
             else:
                 action_text = ""  # Pending — no action yet
             if key in self._watched_keys:
@@ -243,12 +243,12 @@ class PRTab(ttk.Frame):
         pr = self._get_selected_pr()
         if not pr:
             return
-        if pr.status == PRStatus.APPROVED and self._on_merge:
+        if pr.issues:
+            self._on_launch_fix(pr)
+        elif pr.status == PRStatus.APPROVED and self._on_merge:
             self._on_merge(pr)
         elif pr.is_ready_for_review:
             self._on_send_for_review(pr)
-        elif pr.issues:
-            self._on_launch_fix(pr)
 
     def _on_double_click(self, event):
         col = self._tree.identify_column(event.x)
