@@ -112,7 +112,7 @@ class TestClaudeProcessBuildOptions:
         opts = proc._build_options()
         assert str(opts.cwd) == "/test/dir"
         assert opts.include_partial_messages is True
-        assert opts.permission_mode is None
+        assert opts.permission_mode == "acceptEdits"
         assert opts.resume is None
 
     def test_builds_options_with_resume(self):

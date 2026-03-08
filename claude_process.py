@@ -156,8 +156,10 @@ class ClaudeProcess:
             "include_partial_messages": True,
             "env": env,
         }
-        if self._skip_permissions:
-            kwargs["permission_mode"] = "bypassPermissions"
+        # The SDK can't show interactive permission prompts, so we must set a
+        # mode that auto-accepts. "bypassPermissions" allows everything;
+        # "acceptEdits" auto-accepts file edits but is the safer default.
+        kwargs["permission_mode"] = "bypassPermissions" if self._skip_permissions else "acceptEdits"
         if self._session_id:
             kwargs["resume"] = self._session_id
         return ClaudeCodeOptions(**kwargs)
