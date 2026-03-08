@@ -38,6 +38,22 @@ if _tk_ver < 8.6:
     )
     sys.exit(1)
 
+# Check required Python packages
+_missing = []
+try:
+    import claude_code_sdk  # noqa: F401
+except ImportError:
+    _missing.append("claude-code-sdk")
+if _missing:
+    _python = sys.executable
+    _cmd = f"{_python} -m pip install -r requirements.txt --break-system-packages"
+    print(
+        f"Error: Missing required packages: {', '.join(_missing)}\n"
+        f"Install them with:\n\n  {_cmd}\n",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 import json
 import logging
 import os

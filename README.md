@@ -27,6 +27,9 @@ brew install python@3.13 python-tk@3.13
 gh repo clone Hire2Hero/claude-management
 cd claude-management
 
+# Install Python dependencies
+/opt/homebrew/bin/python3.13 -m pip install -r requirements.txt --break-system-packages
+
 # Run
 /opt/homebrew/bin/python3.13 main.py
 ```
@@ -34,6 +37,7 @@ cd claude-management
 If `python3` on your PATH is already 3.10+ with tkinter, you can just run:
 
 ```bash
+pip install -r requirements.txt
 python3 main.py
 ```
 
@@ -71,7 +75,7 @@ main.py                 Entry point and Application class
 config.py               Config dataclass, load/save/bootstrap
 models.py               PRData, ManagedSession, enums, helpers
 session_manager.py      Session registry and state persistence
-claude_process.py       Claude CLI subprocess (stream-json)
+claude_process.py       Claude session manager (claude-code-sdk)
 history.py              Per-session chat history (memory + disk)
 github_client.py        GitHub API via gh CLI
 jira_client.py          Jira REST API client
