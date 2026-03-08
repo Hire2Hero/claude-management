@@ -618,6 +618,8 @@ class Application:
         if name in self._claude_processes:
             self._stop_claude_process(name)
 
+        self._needs_attention.discard(name)
+
         # Log session start to summary (before appending instructions)
         if initial_prompt and not is_resume:
             self._summary_logger.log_session_start(name, initial_prompt)
@@ -721,8 +723,11 @@ class Application:
                             self._append_summary_if_active(name, self._summary_logger.get_content(name))
 
             elif inner_type == "message_stop":
-                if is_active:
-                    panel.set_input_enabled(True)
+                # Don't enable input here — `result` event is the true end-of-turn
+                # signal. message_stop fires for each message including intermediate
+                # tool-use messages, so enabling input here causes premature
+                # "Needs Input" while Claude is still processing tool results.
+                pass
 
             return
 
