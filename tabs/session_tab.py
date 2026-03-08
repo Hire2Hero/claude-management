@@ -61,22 +61,22 @@ class SessionTab(ttk.Frame):
         self._paned.add(self._left_frame, weight=1)
         self._left_visible = True
 
-        columns = ("name", "status", "ticket", "pr", "remove")
+        columns = ("remove", "name", "status", "ticket", "pr")
         self._tree = ttk.Treeview(
             self._left_frame, columns=columns, show="headings", selectmode="browse"
         )
 
+        self._tree.heading("remove", text="")
         self._tree.heading("name", text="Name")
         self._tree.heading("status", text="Status")
         self._tree.heading("ticket", text="Jira Ticket")
         self._tree.heading("pr", text="PR")
-        self._tree.heading("remove", text="")
 
+        self._tree.column("remove", width=30, minwidth=30, anchor="center", stretch=False)
         self._tree.column("name", width=250, minwidth=150)
         self._tree.column("status", width=80, minwidth=60)
         self._tree.column("ticket", width=100, minwidth=60)
         self._tree.column("pr", width=70, minwidth=50, anchor="center")
-        self._tree.column("remove", width=30, minwidth=30, anchor="center", stretch=False)
 
         scrollbar = ttk.Scrollbar(self._left_frame, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=scrollbar.set)
@@ -94,9 +94,15 @@ class SessionTab(ttk.Frame):
         self._tree.bind("<Button-2>", self._on_right_click)
         self._tree.bind("<Button-3>", self._on_right_click)
         self._tree.bind("<Control-Button-1>", self._on_right_click)
-        # Selection change no longer needed (Remove button removed from toolbar)
         self._tree.bind("<Motion>", self._on_motion)
         self._tree.bind("<Leave>", self._on_leave)
+
+        # Tooltip
+        tip_bg, tip_fg = self._tooltip_colors()
+        self._tooltip = tk.Label(
+            self.winfo_toplevel(), text="", background=tip_bg, foreground=tip_fg,
+            relief="solid", borderwidth=1, font=("system", 11),
+        )
 
         self._ctx_menu = tk.Menu(self, tearoff=0)
         self._ctx_menu.add_command(label="Remove Session", command=self._ctx_remove)
@@ -117,13 +123,27 @@ class SessionTab(ttk.Frame):
         # Don't add summary to right_container yet — toggled on demand
         # Don't add right_container to paned yet — shown when a session is opened
 
+    @staticmethod
+    def _tooltip_colors() -> tuple[str, str]:
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["defaults", "read", "-g", "AppleInterfaceStyle"],
+                capture_output=True, text=True, timeout=2,
+            )
+            if result.returncode == 0 and "Dark" in result.stdout:
+                return "#3a3a3c", "#e5e5e7"
+        except Exception:
+            pass
+        return "#ffffe0", "#000000"
+
     def update_sessions(self, sessions: list[ManagedSession],
                         attention_names: set[str] = frozenset()):
         # Preserve selection
         selected_name = None
         sel = self._tree.selection()
         if sel:
-            selected_name = self._tree.item(sel[0], "values")[0]
+            selected_name = self._tree.item(sel[0], "values")[1]
 
         self._sessions = sessions
         self._tree.delete(*self._tree.get_children())
@@ -142,13 +162,13 @@ class SessionTab(ttk.Frame):
                 tag = "stopped"
                 status_display = "Stopped"
             pr_display = "\U0001F517 Open" if s.pr_url else ""
-            remove_display = "\u2715" if s.status == SessionStatus.STOPPED else ""
+            remove_display = "\U0001F5D1" if s.status == SessionStatus.STOPPED else ""  # 🗑
             self._tree.insert("", "end", values=(
+                remove_display,
                 s.name,
                 status_display,
                 s.ticket_id or "",
                 pr_display,
-                remove_display,
             ), tags=(tag,))
 
         total = len(sessions)
@@ -157,7 +177,7 @@ class SessionTab(ttk.Frame):
         # Restore selection and focus
         if selected_name:
             for item in self._tree.get_children():
-                if self._tree.item(item, "values")[0] == selected_name:
+                if self._tree.item(item, "values")[1] == selected_name:
                     self._tree.selection_set(item)
                     self._tree.focus(item)
                     break
@@ -177,7 +197,7 @@ class SessionTab(ttk.Frame):
         """
         for item in self._tree.get_children():
             values = self._tree.item(item, "values")
-            if values[0] == session.name:
+            if values[1] == session.name:
                 self._tree.selection_set(item)
                 break
         self._chat_panel.set_pr_url(session.pr_url)
@@ -238,7 +258,7 @@ class SessionTab(ttk.Frame):
         if not sel:
             return None
         values = self._tree.item(sel[0], "values")
-        name = values[0]
+        name = values[1]
         for s in self._sessions:
             if s.name == name:
                 return s
@@ -253,10 +273,11 @@ class SessionTab(ttk.Frame):
         session = self._get_selected_session()
         if not session:
             return
-        if col == "#4":
-            if session.pr_url:
-                webbrowser.open(session.pr_url)
-        elif col == "#3":
+        if col == "#1":
+            # Remove column
+            if session.status == SessionStatus.STOPPED:
+                self._ctx_remove()
+        elif col == "#4":
             # Ticket column → open Jira
             if session.ticket_id and self._config.jira_base_url:
                 base = self._config.jira_base_url.rstrip("/")
@@ -264,9 +285,8 @@ class SessionTab(ttk.Frame):
                     base += "/browse"
                 webbrowser.open(f"{base}/{session.ticket_id}")
         elif col == "#5":
-            # Remove column
-            if session.status == SessionStatus.STOPPED:
-                self._ctx_remove()
+            if session.pr_url:
+                webbrowser.open(session.pr_url)
         else:
             # Name or other column — open the panel
             self._open_panel(session)
@@ -274,29 +294,40 @@ class SessionTab(ttk.Frame):
     def _on_motion(self, event):
         col = self._tree.identify_column(event.x)
         item = self._tree.identify_row(event.y)
-        if item and col == "#1":
-            # Name column — always clickable
-            self._tree.configure(cursor="hand2")
-            return
-        if item and col == "#4":
+        tip = ""
+
+        if item:
             values = self._tree.item(item, "values")
-            if values and values[3]:
+            if col == "#1" and values and values[0]:
+                # Remove column
                 self._tree.configure(cursor="hand2")
-                return
-        if item and col == "#3":
-            values = self._tree.item(item, "values")
-            if values and values[2]:
+                tip = "Remove session"
+            elif col == "#2":
+                # Name column — always clickable
                 self._tree.configure(cursor="hand2")
-                return
-        if item and col == "#5":
-            values = self._tree.item(item, "values")
-            if values and values[4]:
+            elif col == "#4" and values and values[3]:
                 self._tree.configure(cursor="hand2")
-                return
-        self._tree.configure(cursor=self._default_cursor)
+            elif col == "#5" and values and values[4]:
+                self._tree.configure(cursor="hand2")
+            else:
+                self._tree.configure(cursor=self._default_cursor)
+        else:
+            self._tree.configure(cursor=self._default_cursor)
+
+        if tip:
+            self._tooltip.configure(text=tip)
+            self._tooltip.place(
+                in_=self.winfo_toplevel(),
+                x=event.x_root - self.winfo_toplevel().winfo_rootx() + 12,
+                y=event.y_root - self.winfo_toplevel().winfo_rooty() + 12,
+            )
+            self._tooltip.lift()
+        else:
+            self._tooltip.place_forget()
 
     def _on_leave(self, _event):
         self._tree.configure(cursor=self._default_cursor)
+        self._tooltip.place_forget()
 
     def _on_double_click(self, event):
         # All actions handled by single click now
