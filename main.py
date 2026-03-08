@@ -74,6 +74,15 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(APP_DIR, "config.json")
 DB_PATH = os.path.join(APP_DIR, "data.db")
 
+WORKTREE_INSTRUCTIONS = (
+    "\n\n---\n"
+    "IMPORTANT: Use a git worktree for this work. Before making any changes:\n"
+    "1. Create a worktree: git worktree add ../worktrees/<branch-name> <branch-name>\n"
+    "2. cd into the worktree directory and do all work there.\n"
+    "3. When done, push from the worktree, then cd back and clean up: "
+    "git worktree remove ../worktrees/<branch-name>"
+)
+
 SUMMARY_INSTRUCTIONS = (
     "\n\n---\n"
     "IMPORTANT: Throughout this session, follow these practices:\n"
@@ -635,9 +644,9 @@ class Application:
         if initial_prompt and not is_resume:
             self._summary_logger.log_session_start(name, initial_prompt)
 
-        # Append summary instructions to new sessions (not resumes)
+        # Append worktree and summary instructions to new sessions (not resumes)
         if initial_prompt and not is_resume:
-            initial_prompt += SUMMARY_INSTRUCTIONS
+            initial_prompt += WORKTREE_INSTRUCTIONS + SUMMARY_INSTRUCTIONS
 
         # Increment generation so stale exit events from old processes are ignored
         self._session_gen[name] = self._session_gen.get(name, 0) + 1
