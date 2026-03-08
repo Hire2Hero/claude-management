@@ -256,6 +256,13 @@ class SessionTab(ttk.Frame):
         if col == "#4":
             if session.pr_url:
                 webbrowser.open(session.pr_url)
+        elif col == "#3":
+            # Ticket column → open Jira
+            if session.ticket_id and self._config.jira_base_url:
+                base = self._config.jira_base_url.rstrip("/")
+                if not base.endswith("/browse"):
+                    base += "/browse"
+                webbrowser.open(f"{base}/{session.ticket_id}")
         elif col == "#5":
             # Remove column
             if session.status == SessionStatus.STOPPED:
@@ -292,18 +299,8 @@ class SessionTab(ttk.Frame):
         self._tree.configure(cursor=self._default_cursor)
 
     def _on_double_click(self, event):
-        col = self._tree.identify_column(event.x)
-        session = self._get_selected_session()
-        if not session:
-            return
-        if col == "#3":
-            # Ticket column → open Jira
-            if session.ticket_id and self._config.jira_base_url:
-                base = self._config.jira_base_url.rstrip("/")
-                if not base.endswith("/browse"):
-                    base += "/browse"
-                url = f"{base}/{session.ticket_id}"
-                webbrowser.open(url)
+        # All actions handled by single click now
+        pass
 
     def _on_right_click(self, event):
         item = self._tree.identify_row(event.y)
