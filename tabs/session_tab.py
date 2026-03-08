@@ -90,7 +90,7 @@ class SessionTab(ttk.Frame):
         self._tree.column("created", width=130, minwidth=90)
         self._tree.column("status", width=80, minwidth=60)
         self._tree.column("ticket", width=100, minwidth=60)
-        self._tree.column("pr", width=70, minwidth=50, anchor="center")
+        self._tree.column("pr", width=180, minwidth=100, anchor="center")
 
         scrollbar = ttk.Scrollbar(self._left_frame, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=scrollbar.set)
@@ -176,7 +176,11 @@ class SessionTab(ttk.Frame):
             else:
                 tag = "stopped"
                 status_display = "Stopped"
-            pr_display = "\U0001F517 Open" if s.pr_url else ""
+            pr_display = ""
+            if s.pr_url:
+                # Extract PR number from URL like https://github.com/Org/Repo/pull/37
+                pr_num = s.pr_url.rstrip("/").rsplit("/", 1)[-1]
+                pr_display = f"\U0001F517 {s.repo}#{pr_num}" if s.repo else f"\U0001F517 #{pr_num}"
             remove_display = "\U0001F5D1" if s.status == SessionStatus.STOPPED else ""  # 🗑
             type_display = ""
             if s.session_type:
