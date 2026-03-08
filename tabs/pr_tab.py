@@ -345,7 +345,7 @@ class PRTab(ttk.Frame):
             messagebox.showinfo("Nothing to Fix", "No PRs currently have issues to fix.", parent=self)
             return
         for pr in fixable:
-            self._on_launch_fix(pr)
+            self._on_launch_fix(pr, batch=True)
 
     def _send_all_for_review(self):
         """Send all passing PRs for review."""

@@ -1040,8 +1040,10 @@ class Application:
 
         threading.Thread(target=_do, daemon=True).start()
 
-    def _handle_launch_fix(self, pr: PRData, auto: bool = False):
+    def _handle_launch_fix(self, pr: PRData, auto: bool = False, batch: bool = False):
         """Open a working session to fix the selected PR's issues."""
+        silent = auto or batch
+
         workflow = self.config.skills.fix_pr
         commands = workflow.commands or ["/builtin:fix-pr {pr_url}"]
 
@@ -1067,30 +1069,28 @@ class Application:
         repo_cwd = os.path.join(self.config.base_dir, pr.repo)
         ticket_id = pr.ticket_id
 
-        # Check for a running session for the same ticket (different from a PR fix session)
-        pr_session = self._find_session_for_pr(pr)
-        ticket_session = self._find_running_session_for_ticket(ticket_id)
-        if ticket_session and ticket_session is not pr_session:
-            if auto:
-                # Auto-fix: silently reuse existing session
-                pass
-            else:
-                choice = messagebox.askyesnocancel(
-                    "Existing Session Found",
-                    f"A running session exists for {ticket_id}:\n\n"
-                    f"{ticket_session.name}\n\nOpen existing session instead of starting a fix?",
-                )
-                if choice is None:  # Cancel
-                    return
-                if choice:  # Yes — open existing
-                    self._notebook.select(self.session_tab)
-                    self.session_tab.update_sessions(self.session_mgr.get_all_sessions(), self._needs_attention)
-                    self.session_tab.select_and_open_session(ticket_session)
-                    return
-                # No — continue with PR fix
+        # Check for an existing session for this PR
+        existing = self._find_session_for_pr(pr)
 
-        # Look for an existing session for this PR
-        existing = pr_session
+        # If a Claude process is already running for this PR, handle it
+        if existing and existing.name in self._claude_processes and self._claude_processes[existing.name].is_alive:
+            if silent:
+                log.info("Fix skipped for %s#%d — Claude already running in session %s",
+                         pr.repo, pr.number, existing.name)
+                return
+            choice = messagebox.askyesnocancel(
+                "Session Already Running",
+                f"Claude is already running for PR #{pr.number} ({pr.repo}):\n\n"
+                f"{existing.name}\n\nOpen existing session instead of starting a new fix?",
+            )
+            if choice is None:  # Cancel
+                return
+            if choice:  # Yes — open existing
+                self._notebook.select(self.session_tab)
+                self.session_tab.update_sessions(self.session_mgr.get_all_sessions(), self._needs_attention)
+                self.session_tab.select_and_open_session(existing)
+                return
+            # No — continue (will stop existing process via _start_claude_process)
 
         if existing:
             session = existing
