@@ -466,6 +466,7 @@ class Application:
             on_send_for_review=self._handle_send_for_review,
             on_merge=self._handle_merge,
             on_mark_ready=self._handle_mark_ready,
+            on_watch=self._handle_watch_toggle,
         )
         self.pr_tab.set_refresh_callback(self._handle_refresh)
         self._notebook.add(self.pr_tab, text="My Pull Requests")
@@ -534,6 +535,7 @@ class Application:
             while True:
                 event_type, data = self.ui_queue.get_nowait()
                 if event_type == "update_prs":
+                    self.pr_tab.set_watched_keys(self.monitor.state.get_watched_keys())
                     self.pr_tab.update_prs(data)
                 elif event_type == "poll_complete":
                     self.pr_tab.update_poll_time(data)
@@ -570,6 +572,16 @@ class Application:
                     repo, number, status = data
                     self._review_statuses[f"{repo}#{number}"] = status
                     self.pr_review_tab.update_review_status(repo, number, status)
+                elif event_type == "auto_launch_fix":
+                    pr = data
+                    # Guard: skip if a Claude process is already running for this PR
+                    existing = self._find_session_for_pr(pr)
+                    if existing and existing.name in self._claude_processes and self._claude_processes[existing.name].is_alive:
+                        log.info("Auto-fix skipped for %s#%d — Claude already running in session %s",
+                                 pr.repo, pr.number, existing.name)
+                    else:
+                        log.info("Auto-launching fix for watched PR %s#%d", pr.repo, pr.number)
+                        self._handle_launch_fix(pr, auto=True)
                 elif event_type == "claude_event":
                     name, evt = data
                     self._handle_claude_event(name, evt)
@@ -1028,7 +1040,7 @@ class Application:
 
         threading.Thread(target=_do, daemon=True).start()
 
-    def _handle_launch_fix(self, pr: PRData):
+    def _handle_launch_fix(self, pr: PRData, auto: bool = False):
         """Open a working session to fix the selected PR's issues."""
         workflow = self.config.skills.fix_pr
         commands = workflow.commands or ["/builtin:fix-pr {pr_url}"]
@@ -1059,19 +1071,23 @@ class Application:
         pr_session = self._find_session_for_pr(pr)
         ticket_session = self._find_running_session_for_ticket(ticket_id)
         if ticket_session and ticket_session is not pr_session:
-            choice = messagebox.askyesnocancel(
-                "Existing Session Found",
-                f"A running session exists for {ticket_id}:\n\n"
-                f"{ticket_session.name}\n\nOpen existing session instead of starting a fix?",
-            )
-            if choice is None:  # Cancel
-                return
-            if choice:  # Yes — open existing
-                self._notebook.select(self.session_tab)
-                self.session_tab.update_sessions(self.session_mgr.get_all_sessions(), self._needs_attention)
-                self.session_tab.select_and_open_session(ticket_session)
-                return
-            # No — continue with PR fix
+            if auto:
+                # Auto-fix: silently reuse existing session
+                pass
+            else:
+                choice = messagebox.askyesnocancel(
+                    "Existing Session Found",
+                    f"A running session exists for {ticket_id}:\n\n"
+                    f"{ticket_session.name}\n\nOpen existing session instead of starting a fix?",
+                )
+                if choice is None:  # Cancel
+                    return
+                if choice:  # Yes — open existing
+                    self._notebook.select(self.session_tab)
+                    self.session_tab.update_sessions(self.session_mgr.get_all_sessions(), self._needs_attention)
+                    self.session_tab.select_and_open_session(ticket_session)
+                    return
+                # No — continue with PR fix
 
         # Look for an existing session for this PR
         existing = pr_session
@@ -1108,6 +1124,11 @@ class Application:
         self.session_tab.select_and_open_session(session)
         self._start_claude_process(session, initial_prompt=prompt)
         self.session_tab.update_sessions(self.session_mgr.get_all_sessions(), self._needs_attention)
+
+    def _handle_watch_toggle(self, pr: PRData, watched: bool):
+        """Toggle the watched (auto-fix) state for a PR."""
+        self.monitor.state.set_watched(pr.repo, pr.number, watched)
+        self.pr_tab.set_watched_keys(self.monitor.state.get_watched_keys())
 
     def _find_running_session_for_ticket(self, ticket_id: str) -> ManagedSession | None:
         """Find a running session that matches the given ticket ID."""

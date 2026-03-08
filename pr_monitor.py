@@ -163,6 +163,7 @@ class StateTracker:
                 claude_pid=r["claude_pid"],
                 ci_was_failing=bool(r["ci_was_failing"]),
                 slack_sent=bool(r["slack_sent"]),
+                watched=bool(r["watched"]),
             )
 
     def save(self):
@@ -171,8 +172,8 @@ class StateTracker:
                 self._db.execute(
                     "INSERT OR REPLACE INTO tracked_prs "
                     "(key, repo, number, branch, last_issue, last_action, "
-                    "last_action_time, claude_pid, ci_was_failing, slack_sent) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "last_action_time, claude_pid, ci_was_failing, slack_sent, watched) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         key,
                         pr.repo,
@@ -184,6 +185,7 @@ class StateTracker:
                         pr.claude_pid,
                         int(pr.ci_was_failing),
                         int(pr.slack_sent),
+                        int(pr.watched),
                     ),
                 )
 
@@ -192,6 +194,15 @@ class StateTracker:
         if key not in self.prs:
             self.prs[key] = TrackedPR(repo=repo, number=number, branch="")
         return self.prs[key]
+
+    def set_watched(self, repo: str, number: int, watched: bool):
+        key = f"{repo}#{number}"
+        if key in self.prs:
+            self.prs[key].watched = watched
+            self.save()
+
+    def get_watched_keys(self) -> set[str]:
+        return {k for k, pr in self.prs.items() if pr.watched}
 
     def remove_closed(self, open_keys: set[str]):
         closed = [k for k in self.prs if k not in open_keys]
@@ -260,8 +271,17 @@ class PRMonitorThread(threading.Thread):
                      pr.repo, pr.number, pr.branch, issue.value, action.value)
 
             if action == PRAction.LAUNCH_CLAUDE:
-                # Don't auto-launch Claude — user triggers manually from PR tab
-                log.info("PR %s#%d needs fix (skipping auto-launch)", pr.repo, pr.number)
+                if not tracked.watched:
+                    log.info("PR %s#%d needs fix (not watched, skipping)", pr.repo, pr.number)
+                    continue
+                # Don't launch if Claude is already running for this PR
+                if tracked.claude_pid and is_pid_alive(tracked.claude_pid):
+                    log.info("PR %s#%d already has Claude running (pid %d)", pr.repo, pr.number, tracked.claude_pid)
+                    continue
+                self.ui_queue.put(("auto_launch_fix", pr))
+                tracked.last_issue = issue.value
+                tracked.last_action = action.value
+                tracked.last_action_time = time.time()
                 continue
 
             self._execute(pr, tracked, issue, action)

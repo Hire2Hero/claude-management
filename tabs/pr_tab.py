@@ -16,15 +16,18 @@ class PRTab(ttk.Frame):
     def __init__(self, parent: ttk.Notebook, on_update_branch: Callable,
                  on_launch_fix: Callable, on_send_for_review: Callable,
                  on_merge: Callable | None = None,
-                 on_mark_ready: Callable | None = None):
+                 on_mark_ready: Callable | None = None,
+                 on_watch: Callable | None = None):
         super().__init__(parent)
         self._on_update_branch = on_update_branch
         self._on_launch_fix = on_launch_fix
         self._on_send_for_review = on_send_for_review
         self._on_merge = on_merge
         self._on_mark_ready = on_mark_ready
+        self._on_watch = on_watch
         self._prs: list[PRData] = []
         self._last_poll: Optional[float] = None
+        self._watched_keys: set[str] = set()
 
         self._build_toolbar()
         self._build_table()
@@ -126,6 +129,8 @@ class PRTab(ttk.Frame):
         self._ctx_menu.add_command(label="Open in Browser", command=self._ctx_open_browser)
         self._ctx_menu.add_command(label="Update Branch", command=self._ctx_update_branch)
         self._ctx_menu.add_command(label="Launch Claude Fix", command=self._ctx_launch_fix)
+        self._ctx_menu.add_command(label="Watch (Auto-Fix)", command=self._ctx_toggle_watch)
+        self._ctx_watch_index = self._ctx_menu.index("end")
         self._ctx_menu.add_command(label="Mark Ready (Remove Draft)", command=self._ctx_mark_ready)
         self._ctx_menu.add_separator()
         self._ctx_menu.add_command(label="Send for Review", command=self._ctx_send_for_review)
@@ -154,6 +159,11 @@ class PRTab(ttk.Frame):
     def set_refresh_callback(self, callback: Callable):
         self._refresh_btn.configure(command=callback)
 
+    def set_watched_keys(self, keys: set[str]):
+        self._watched_keys = keys
+        if self._prs:
+            self.update_prs(self._prs)
+
     def update_prs(self, prs: list[PRData]):
         if self._loading_visible:
             self._loading_frame.destroy()
@@ -171,6 +181,7 @@ class PRTab(ttk.Frame):
 
         for pr in sorted(prs, key=lambda p: (p.repo, p.number)):
             tag = pr.status.value
+            key = f"{pr.repo}#{pr.number}"
             if pr.status == PRStatus.APPROVED:
                 action_text = self._MERGE_ICON
             elif pr.is_ready_for_review:
@@ -179,6 +190,8 @@ class PRTab(ttk.Frame):
                 action_text = self._FIX_ICON
             else:
                 action_text = ""  # Pending — no action yet
+            if key in self._watched_keys:
+                action_text = "\U0001f441 " + action_text  # 👁 prefix
             draft_icon = self._DRAFT_ICON if pr.is_draft else ""
             self._tree.insert("", "end", values=(
                 action_text,
@@ -294,6 +307,12 @@ class PRTab(ttk.Frame):
         item = self._tree.identify_row(event.y)
         if item:
             self._tree.selection_set(item)
+            pr = self._get_selected_pr()
+            if pr:
+                key = f"{pr.repo}#{pr.number}"
+                is_watched = key in self._watched_keys
+                label = "Unwatch" if is_watched else "Watch (Auto-Fix)"
+                self._ctx_menu.entryconfigure(self._ctx_watch_index, label=label)
             self._ctx_menu.tk_popup(event.x_root, event.y_root)
 
     def _ctx_open_browser(self):
@@ -310,6 +329,13 @@ class PRTab(ttk.Frame):
         pr = self._get_selected_pr()
         if pr:
             self._on_launch_fix(pr)
+
+    def _ctx_toggle_watch(self):
+        pr = self._get_selected_pr()
+        if pr and self._on_watch:
+            key = f"{pr.repo}#{pr.number}"
+            is_watched = key in self._watched_keys
+            self._on_watch(pr, not is_watched)
 
     def _fix_all(self):
         """Launch Claude fix for all PRs that have issues."""

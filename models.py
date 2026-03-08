@@ -174,6 +174,7 @@ class TrackedPR:
     claude_pid: Optional[int] = None
     ci_was_failing: bool = False
     slack_sent: bool = False
+    watched: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -190,6 +191,7 @@ class TrackedPR:
             claude_pid=d.get("claude_pid"),
             ci_was_failing=d.get("ci_was_failing", False),
             slack_sent=d.get("slack_sent", False),
+            watched=d.get("watched", False),
         )
 
 
