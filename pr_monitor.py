@@ -253,6 +253,22 @@ class PRMonitorThread(threading.Thread):
     def _poll(self):
         log.info("PR poll cycle starting")
         prs = self.gh.fetch_all_prs()
+
+        # Also fetch manually-added PRs
+        manual_rows = self.state._db.fetchall("SELECT repo, number FROM manual_prs")
+        existing_keys = {f"{pr.repo}#{pr.number}" for pr in prs}
+        for row in manual_rows:
+            key = f"{row['repo']}#{row['number']}"
+            if key in existing_keys:
+                continue  # Already fetched via --author @me
+            pr = self.gh.fetch_single_pr(row["repo"], row["number"])
+            if pr:
+                prs.append(pr)
+            else:
+                # PR closed or not found — remove from manual list
+                self.state._db.execute("DELETE FROM manual_prs WHERE key = ?", (key,))
+                log.info("Removed closed manual PR %s", key)
+
         open_keys: set[str] = set()
 
         for pr in prs:

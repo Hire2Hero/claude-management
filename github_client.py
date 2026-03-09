@@ -110,6 +110,50 @@ class GitHubClient:
             counts[num] = sum(1 for t in threads if not t.get("isResolved", True))
         return counts
 
+    def fetch_single_pr(self, repo: str, number: int) -> PRData | None:
+        """Fetch a single PR by repo and number (for manually-added PRs)."""
+        try:
+            result = subprocess.run(
+                [
+                    "gh", "pr", "view", str(number),
+                    "--repo", f"{self.config.org}/{repo}",
+                    "--json", PR_FIELDS,
+                ],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode != 0:
+                log.error("gh pr view failed for %s#%d: %s", repo, number, result.stderr.strip())
+                return None
+            p = json.loads(result.stdout)
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError) as e:
+            log.error("Failed to fetch PR %s#%d: %s", repo, number, e)
+            return None
+
+        # Skip closed PRs
+        if p.get("state", "").upper() != "OPEN":
+            return None
+
+        checks = [CheckRun.from_dict(c) for c in (p.get("statusCheckRollup") or [])]
+        pr = PRData(
+            repo=repo,
+            number=p["number"],
+            title=p.get("title", ""),
+            branch=p.get("headRefName", ""),
+            url=p.get("url", ""),
+            mergeable=p.get("mergeable", "UNKNOWN"),
+            merge_state_status=p.get("mergeStateStatus", "UNKNOWN"),
+            review_decision=p.get("reviewDecision", "") or "",
+            checks=checks,
+            is_draft=p.get("isDraft", False),
+            author=p.get("author", {}).get("login", ""),
+            head_sha=p.get("headRefOid", ""),
+        )
+
+        # Fetch unresolved threads
+        thread_counts = self._fetch_unresolved_threads(repo, [number])
+        pr.unresolved_thread_count = thread_counts.get(number, 0)
+        return pr
+
     def fetch_all_prs(self) -> list[PRData]:
         all_prs: list[PRData] = []
         with ThreadPoolExecutor(max_workers=4) as pool:

@@ -6,7 +6,7 @@ import sqlite3
 import threading
 from typing import Optional
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
@@ -70,6 +70,12 @@ CREATE TABLE IF NOT EXISTS ui_state (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS manual_prs (
+    key    TEXT PRIMARY KEY,
+    repo   TEXT NOT NULL,
+    number INTEGER NOT NULL
+);
 """
 
 _MIGRATIONS = {
@@ -92,6 +98,13 @@ CREATE TABLE IF NOT EXISTS pr_reviews (
 CREATE TABLE IF NOT EXISTS ui_state (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
+);
+""",
+    10: """\
+CREATE TABLE IF NOT EXISTS manual_prs (
+    key    TEXT PRIMARY KEY,
+    repo   TEXT NOT NULL,
+    number INTEGER NOT NULL
 );
 """,
 }

@@ -533,6 +533,8 @@ class Application:
             on_merge=self._handle_merge,
             on_mark_ready=self._handle_mark_ready,
             on_watch=self._handle_watch_toggle,
+            on_add_pr=self._handle_add_pr,
+            on_remove_pr=self._handle_remove_pr,
             poll_interval=self.config.poll_interval,
         )
         self.pr_tab.set_refresh_callback(self._handle_refresh)
@@ -606,6 +608,7 @@ class Application:
                 event_type, data = self.ui_queue.get_nowait()
                 if event_type == "update_prs":
                     self.pr_tab.set_watched_keys(self.monitor.state.get_watched_keys())
+                    self.pr_tab.set_manual_keys(self._get_manual_pr_keys())
                     self.pr_tab.update_prs(data)
                 elif event_type == "poll_complete":
                     self.pr_tab.update_poll_time(data)
@@ -1367,6 +1370,52 @@ class Application:
         """Toggle the watched (auto-fix) state for a PR."""
         self.monitor.state.set_watched(pr.repo, pr.number, watched)
         self.pr_tab.set_watched_keys(self.monitor.state.get_watched_keys())
+
+    def _get_manual_pr_keys(self) -> set[str]:
+        """Return set of keys for manually-added PRs."""
+        rows = self._db.fetchall("SELECT key FROM manual_prs")
+        return {row["key"] for row in rows}
+
+    def _handle_add_pr(self):
+        """Show dialog to add a PR by URL or repo#number."""
+        from widgets.dialogs import AddPRDialog
+        dialog = AddPRDialog(self.root, self.config.org)
+        if dialog.result is None:
+            return
+        repo, number = dialog.result
+        key = f"{repo}#{number}"
+
+        # Check if already tracked
+        existing = self._db.fetchone("SELECT key FROM manual_prs WHERE key = ?", (key,))
+        if existing:
+            from tkinter import messagebox
+            messagebox.showinfo("Already Added", f"{repo}#{number} is already in your list.", parent=self.root)
+            return
+
+        # Verify PR exists and is open
+        pr = self.gh.fetch_single_pr(repo, number)
+        if not pr:
+            from tkinter import messagebox
+            messagebox.showwarning("Not Found", f"PR {repo}#{number} was not found or is not open.", parent=self.root)
+            return
+
+        self._db.execute(
+            "INSERT OR IGNORE INTO manual_prs (key, repo, number) VALUES (?, ?, ?)",
+            (key, repo, number),
+        )
+        log.info("Manually added PR %s", key)
+        # Trigger refresh to pick it up immediately
+        if self.monitor:
+            self.monitor.poll_now()
+
+    def _handle_remove_pr(self, pr: PRData):
+        """Remove a manually-added PR from the list."""
+        key = f"{pr.repo}#{pr.number}"
+        self._db.execute("DELETE FROM manual_prs WHERE key = ?", (key,))
+        log.info("Removed manual PR %s", key)
+        # Refresh to update the view
+        if self.monitor:
+            self.monitor.poll_now()
 
     def _find_running_session_for_ticket(self, ticket_id: str) -> ManagedSession | None:
         """Find a running session that matches the given ticket ID."""

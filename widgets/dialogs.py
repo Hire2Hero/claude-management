@@ -400,6 +400,76 @@ class TriageDialog(tk.Toplevel):
         self.destroy()
 
 
+class AddPRDialog(tk.Toplevel):
+    """Dialog for adding a PR by URL to My Pull Requests."""
+
+    # Matches GitHub PR URLs like https://github.com/org/repo/pull/123
+    _PR_URL_RE = re.compile(r"https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)")
+
+    def __init__(self, parent: tk.Widget, org: str):
+        super().__init__(parent)
+        self.title("Add Pull Request")
+        self.geometry("450x130")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        self._org = org
+        self.result: Optional[tuple[str, int]] = None  # (repo, number)
+
+        ttk.Label(self, text="PR URL or repo#number:").pack(
+            anchor="w", padx=10, pady=(10, 2),
+        )
+        self._entry = ttk.Entry(self, width=55)
+        self._entry.pack(padx=10, pady=2)
+        self._entry.focus_set()
+
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(pady=10)
+        ttk.Button(btn_frame, text="Add", command=self._submit).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="Cancel", command=self._cancel).pack(side="left", padx=5)
+
+        self.bind("<Return>", lambda _: self._submit())
+        self.bind("<Escape>", lambda _: self._cancel())
+        self.wait_window()
+
+    def _submit(self):
+        text = self._entry.get().strip()
+        if not text:
+            return
+
+        # Try URL format: https://github.com/org/repo/pull/123
+        m = self._PR_URL_RE.search(text)
+        if m:
+            repo = m.group(2)
+            number = int(m.group(3))
+            self.result = (repo, number)
+            self.destroy()
+            return
+
+        # Try repo#number format
+        if "#" in text:
+            parts = text.split("#", 1)
+            try:
+                repo = parts[0].strip()
+                number = int(parts[1].strip())
+                self.result = (repo, number)
+                self.destroy()
+                return
+            except (ValueError, IndexError):
+                pass
+
+        messagebox.showwarning(
+            "Invalid Format",
+            "Enter a GitHub PR URL or repo#number (e.g., InstanceBackend#42).",
+            parent=self,
+        )
+
+    def _cancel(self):
+        self.result = None
+        self.destroy()
+
+
 class EditReposDialog(tk.Toplevel):
     """Dialog for updating the monitored repository list."""
 

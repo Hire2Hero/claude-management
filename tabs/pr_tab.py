@@ -18,6 +18,8 @@ class PRTab(ttk.Frame):
                  on_merge: Callable | None = None,
                  on_mark_ready: Callable | None = None,
                  on_watch: Callable | None = None,
+                 on_add_pr: Callable | None = None,
+                 on_remove_pr: Callable | None = None,
                  poll_interval: int = 300):
         super().__init__(parent)
         self._on_update_branch = on_update_branch
@@ -26,10 +28,13 @@ class PRTab(ttk.Frame):
         self._on_merge = on_merge
         self._on_mark_ready = on_mark_ready
         self._on_watch = on_watch
+        self._on_add_pr = on_add_pr
+        self._on_remove_pr = on_remove_pr
         self._poll_interval = poll_interval
         self._prs: list[PRData] = []
         self._last_poll: Optional[float] = None
         self._watched_keys: set[str] = set()
+        self._manual_keys: set[str] = set()
 
         self._build_toolbar()
         self._build_table()
@@ -67,6 +72,9 @@ class PRTab(ttk.Frame):
 
         self._review_btn = ttk.Button(toolbar, text="Send All for Review", command=self._send_all_for_review)
         self._review_btn.pack(side="left", padx=(5, 0))
+
+        self._add_pr_btn = ttk.Button(toolbar, text="+ Add PR", command=self._on_add_pr_click)
+        self._add_pr_btn.pack(side="left", padx=(5, 0))
 
         self._poll_label = ttk.Label(toolbar, text="Last poll: never")
         self._poll_label.pack(side="left", padx=10)
@@ -154,6 +162,9 @@ class PRTab(ttk.Frame):
         self._ctx_menu.add_separator()
         self._ctx_menu.add_command(label="Send for Review", command=self._ctx_send_for_review)
         self._ctx_menu.add_command(label="Merge", command=self._ctx_merge)
+        self._ctx_menu.add_separator()
+        self._ctx_menu.add_command(label="Remove from My PRs", command=self._ctx_remove_pr)
+        self._ctx_remove_index = self._ctx_menu.index("end")
 
     @staticmethod
     def _tooltip_colors() -> tuple[str, str]:
@@ -177,6 +188,9 @@ class PRTab(ttk.Frame):
 
     def set_refresh_callback(self, callback: Callable):
         self._refresh_btn.configure(command=callback)
+
+    def set_manual_keys(self, keys: set[str]):
+        self._manual_keys = keys
 
     def set_watched_keys(self, keys: set[str]):
         self._watched_keys = keys
@@ -369,6 +383,10 @@ class PRTab(ttk.Frame):
                 is_watched = key in self._watched_keys
                 label = "Unwatch" if is_watched else "Watch (Auto-Fix)"
                 self._ctx_menu.entryconfigure(self._ctx_watch_index, label=label)
+                # Only show "Remove from My PRs" for manually-added PRs
+                is_manual = key in self._manual_keys
+                state = "normal" if is_manual else "disabled"
+                self._ctx_menu.entryconfigure(self._ctx_remove_index, state=state)
             self._ctx_menu.tk_popup(event.x_root, event.y_root)
 
     def _ctx_open_browser(self):
@@ -454,3 +472,17 @@ class PRTab(ttk.Frame):
             return
         if self._on_merge:
             self._on_merge(pr)
+
+    def _ctx_remove_pr(self):
+        pr = self._get_selected_pr()
+        if not pr:
+            return
+        key = f"{pr.repo}#{pr.number}"
+        if key not in self._manual_keys:
+            return
+        if self._on_remove_pr:
+            self._on_remove_pr(pr)
+
+    def _on_add_pr_click(self):
+        if self._on_add_pr:
+            self._on_add_pr()
