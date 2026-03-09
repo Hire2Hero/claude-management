@@ -82,7 +82,7 @@ class PRReviewTab(ttk.Frame):
 
         self._hide_drafts_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(toolbar, text="Hide Drafts", variable=self._hide_drafts_var,
-                        command=self._refresh_table).pack(side="right", padx=(0, 10))
+                        command=self._on_hide_drafts_changed).pack(side="right", padx=(0, 10))
 
     _REVIEW_ICON = "\U0001F50D Review"  # 🔍 Review
     _DRAFT_ICON = "\U0001F4DD"         # 📝
@@ -148,9 +148,26 @@ class PRReviewTab(ttk.Frame):
         self._ctx_menu.add_command(label="Open in Browser", command=self._ctx_open_browser)
 
     def set_refresh_callback(self, callback: Callable):
+        self._refresh_callback = callback
         self._refresh_btn.configure(command=callback)
 
+    def _on_hide_drafts_changed(self):
+        if hasattr(self, "_refresh_callback"):
+            self._refresh_callback()
+        else:
+            self._refresh_table()
+
+    @property
+    def hide_drafts(self) -> bool:
+        return self._hide_drafts_var.get()
+
     # ── Public API ────────────────────────────────────────────────────────
+
+    def show_loading(self):
+        self._refresh_btn.configure(text="\u23f3 Loading...", state="disabled")
+
+    def hide_loading(self):
+        self._refresh_btn.configure(text="Refresh", state="normal")
 
     def update_prs(self, prs: list[PRData], review_statuses: dict[str, str]):
         if self._loading_visible:

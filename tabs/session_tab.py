@@ -9,6 +9,7 @@ from tkinter import ttk
 from typing import Callable, Optional
 
 from config import Config
+from database import Database
 from models import ManagedSession, SessionStatus, SessionType
 from widgets.chat_panel import ChatPanel
 from widgets.summary_panel import SummaryPanel
@@ -27,9 +28,11 @@ class SessionTab(ttk.Frame):
         on_triage: Callable = lambda: None,
         on_remove_session: Callable[[str], None] = lambda name: None,
         on_restart_session: Callable[[str], None] = lambda name: None,
+        db: Optional[Database] = None,
     ):
         super().__init__(parent)
         self._config = config
+        self._db = db
         self._on_new_session = on_new_session
         self._on_start_ticket = on_start_ticket
         self._on_triage = on_triage
@@ -41,6 +44,7 @@ class SessionTab(ttk.Frame):
         self._sessions: list[ManagedSession] = []
         self._active_session_name: Optional[str] = None
         self._summary_visible = False
+        self._last_sash_pos: Optional[int] = None
 
         self._build_toolbar()
         self._build_paned()
@@ -90,7 +94,7 @@ class SessionTab(ttk.Frame):
         self._tree.column("created", width=130, minwidth=90)
         self._tree.column("status", width=80, minwidth=60)
         self._tree.column("ticket", width=100, minwidth=60)
-        self._tree.column("pr", width=180, minwidth=100, anchor="center")
+        self._tree.column("pr", width=180, minwidth=100, anchor="w")
 
         scrollbar = ttk.Scrollbar(self._left_frame, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=scrollbar.set)
@@ -131,6 +135,7 @@ class SessionTab(ttk.Frame):
             on_stop=self._handle_chat_stop,
             on_close=self.close_panel,
             on_toggle_summary=self._toggle_summary,
+            on_restart=self._handle_chat_restart,
         )
         self._right_container.add(self._chat_panel, weight=2)
 
@@ -246,6 +251,7 @@ class SessionTab(ttk.Frame):
         """Hide the chat panel and summary panel."""
         self._hide_summary()
         if self._panel_visible():
+            self._save_panel_width()
             self._paned.remove(self._right_container)
         self._active_session_name = None
 
@@ -256,7 +262,12 @@ class SessionTab(ttk.Frame):
         """Show the chat panel without triggering process start."""
         self._active_session_name = name
         if not self._panel_visible():
-            self._paned.add(self._right_container, weight=2)
+            self._paned.add(self._right_container, weight=3)
+            # Restore saved right-pane width after layout (default 600px)
+            right_width = self._load_panel_width() or 600
+            self.after(50, lambda: self._apply_panel_width(right_width))
+            self._paned.bind("<Button-1>", self._on_sash_press)
+            self._paned.bind("<ButtonRelease-1>", self._on_sash_release)
         # Restore left pane if it was hidden
         if not self._left_visible:
             self._toggle_session_list()
@@ -416,5 +427,67 @@ class SessionTab(ttk.Frame):
     def _handle_chat_stop(self):
         if self._active_session_name:
             self._on_stop_session(self._active_session_name)
+
+    def _handle_chat_restart(self):
+        if self._active_session_name:
+            self._on_restart_session(self._active_session_name)
+
+    def _on_sash_press(self, _event):
+        """Record sash position before a potential drag."""
+        try:
+            if self._panel_visible():
+                self._last_sash_pos = self._paned.sashpos(0)
+        except Exception:
+            self._last_sash_pos = None
+
+    def _on_sash_release(self, _event):
+        """Save width only if the sash actually moved (i.e., user dragged it)."""
+        if not self._panel_visible() or self._last_sash_pos is None:
+            return
+        try:
+            current = self._paned.sashpos(0)
+        except Exception:
+            return
+        if current != self._last_sash_pos:
+            self._save_panel_width()
+        self._last_sash_pos = None
+
+    def _save_panel_width(self):
+        """Persist the right pane (slideout) width."""
+        if not self._db or not self._panel_visible():
+            return
+        try:
+            total = self._paned.winfo_width()
+            sash_x = self._paned.sashpos(0)
+        except Exception:
+            return
+        right_width = total - sash_x
+        if right_width > 50 and total > 100:
+            self._db.execute(
+                "INSERT OR REPLACE INTO ui_state (key, value) VALUES (?, ?)",
+                ("chat_panel_width", str(right_width)),
+            )
+
+    def _load_panel_width(self) -> Optional[int]:
+        if not self._db:
+            return None
+        row = self._db.fetchone("SELECT value FROM ui_state WHERE key = ?", ("chat_panel_width",))
+        if row:
+            try:
+                return int(row["value"])
+            except (ValueError, TypeError):
+                pass
+        return None
+
+    def _apply_panel_width(self, right_width: int):
+        """Set the sash position so the right pane has the given width."""
+        try:
+            if self._panel_visible():
+                total = self._paned.winfo_width()
+                sash_x = total - right_width
+                if sash_x > 0:
+                    self._paned.sashpos(0, sash_x)
+        except Exception:
+            pass
 
 

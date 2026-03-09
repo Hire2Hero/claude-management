@@ -557,6 +557,7 @@ class Application:
             on_stop_session=self._handle_stop_session,
             on_remove_session=self._handle_remove_session,
             on_restart_session=self._handle_restart_session,
+            db=self._db,
         )
         self._notebook.add(self.session_tab, text="Working Sessions")
 
@@ -634,6 +635,7 @@ class Application:
                 elif event_type == "update_team_prs":
                     prs, statuses = data
                     self._review_statuses = statuses
+                    self.pr_review_tab.hide_loading()
                     self.pr_review_tab.update_prs(prs, statuses)
                 elif event_type == "review_poll_complete":
                     self.pr_review_tab.update_poll_time(data)
@@ -707,8 +709,11 @@ class Application:
             self._summary_logger.log_session_start(name, initial_prompt)
 
         # Append worktree and summary instructions to new sessions (not resumes)
+        # Skip worktree instructions for triage sessions — they don't make code changes
         if initial_prompt and not is_resume:
-            initial_prompt += WORKTREE_INSTRUCTIONS + SUMMARY_INSTRUCTIONS
+            if session.session_type != SessionType.WORKING_TRIAGE.value:
+                initial_prompt += WORKTREE_INSTRUCTIONS
+            initial_prompt += SUMMARY_INSTRUCTIONS
 
         # Increment generation so stale exit events from old processes are ignored
         self._session_gen[name] = self._session_gen.get(name, 0) + 1
@@ -782,11 +787,23 @@ class Application:
 
         evt_type = evt.get("type", "")
 
-        # Unwrap stream_event envelope — inner event has the actual type
+        # Stream events: SDK wraps in {"type": "stream_event", "event": {...}},
+        # direct subprocess emits raw {"type": "content_block_delta", ...}.
+        # Normalize both into inner/inner_type for processing.
+        _STREAM_TYPES = {"content_block_start", "content_block_delta", "content_block_stop", "message_stop", "message_start"}
         if evt_type == "stream_event":
             inner = evt.get("event", {})
             inner_type = inner.get("type", "")
+        elif evt_type in _STREAM_TYPES:
+            inner = evt
+            inner_type = evt_type
+            evt_type = "stream_event"  # Treat as stream event for the logic below
+        else:
+            inner = {}
+            inner_type = ""
 
+        # Process stream events (after normalization above)
+        if evt_type == "stream_event":
             if inner_type == "content_block_start":
                 content_block = inner.get("content_block", {})
                 if content_block.get("type") == "tool_use":
@@ -811,7 +828,7 @@ class Application:
             elif inner_type == "content_block_stop":
                 buf = self._tool_input_buf.pop(name, None)
                 if buf:
-                    # Track AskUserQuestion — the SDK can't handle it
+                    # Track AskUserQuestion — the subprocess can't handle it
                     # interactively, so the query will exit. We capture the
                     # question so _handle_claude_exit can keep the session
                     # alive for the user to respond.
@@ -1565,9 +1582,11 @@ class Application:
             self._handle_review_refresh()
 
     def _handle_review_refresh(self):
+        self.pr_review_tab.show_loading()
+
         def _do():
             current_user = self.gh.get_current_user()
-            all_prs = self.gh.fetch_all_team_prs()
+            all_prs = self.gh.fetch_all_team_prs(exclude_drafts=self.pr_review_tab.hide_drafts)
 
             team_prs = [
                 pr for pr in all_prs
@@ -1610,11 +1629,8 @@ class Application:
         if status == STATUS_REVIEWING:
             return
 
-        # Check if already reviewed at this commit
-        existing = self._db.fetchone(
-            "SELECT head_sha FROM pr_reviews WHERE key = ? AND completed = 1", (key,)
-        )
-        if existing and existing["head_sha"] == pr.head_sha and pr.head_sha:
+        # Only warn about re-review when the Review column already shows reviewed
+        if status in (STATUS_REVIEWED_BY_CLAUDE, STATUS_REVIEWED_BY_ME):
             proceed = messagebox.askyesno(
                 "Already Reviewed",
                 f"PR {pr.repo}#{pr.number} was already reviewed at this commit.\n"

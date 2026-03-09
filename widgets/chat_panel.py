@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tkinter as tk
 import webbrowser
+from pathlib import Path
 from tkinter import ttk
 from typing import Callable, Optional
 
@@ -20,12 +21,14 @@ class ChatPanel(ttk.Frame):
         on_stop: Callable[[], None],
         on_close: Callable[[], None] = lambda: None,
         on_toggle_summary: Callable[[], None] = lambda: None,
+        on_restart: Callable[[], None] = lambda: None,
     ):
         super().__init__(parent)
         self._on_send = on_send
         self._on_stop = on_stop
         self._on_close = on_close
         self._on_toggle_summary = on_toggle_summary
+        self._on_restart = on_restart
         self._build_ui()
 
     def _build_ui(self):
@@ -34,30 +37,45 @@ class ChatPanel(ttk.Frame):
         status_frame.pack(fill="x", padx=5, pady=(5, 0))
 
         # Buttons packed right-to-left first so they always have space
-        self._close_btn = ttk.Button(
-            status_frame, text="\u2715", width=3, command=self._on_close
+        btn_kw = dict(
+            borderwidth=1, relief="raised", cursor="hand2",
+            padx=2, pady=0, font=("TkDefaultFont", 13),
+        )
+        self._close_btn = tk.Button(
+            status_frame, text="\u2715", command=self._on_close, **btn_kw,
         )
         self._close_btn.pack(side="right")
         self._add_tooltip(self._close_btn, "Close panel")
 
-        self._summary_btn = ttk.Button(
-            status_frame, text="\U0001F4CB", width=3, command=self._on_toggle_summary
+        self._summary_btn = tk.Button(
+            status_frame, text="\U0001F4CB", command=self._on_toggle_summary, **btn_kw,
         )
         self._summary_btn.pack(side="right", padx=(0, 3))
         self._add_tooltip(self._summary_btn, "Toggle summary")
 
         # PR link — hidden by default, shown when session has a PR URL
         self._pr_url: Optional[str] = None
-        self._pr_btn = ttk.Button(
-            status_frame, text="\U0001F500", width=3, command=self._open_pr
-        )
-        self._add_tooltip(self._pr_btn, "Open pull request")
+        self._pr_icon = self._load_pr_icon(btn_kw)
+        if self._pr_icon:
+            self._pr_btn = tk.Button(
+                status_frame, image=self._pr_icon, command=self._open_pr, **btn_kw,
+            )
+        else:
+            self._pr_btn = tk.Button(
+                status_frame, text="PR", command=self._open_pr, **btn_kw,
+            )
 
         # Stop — hidden by default, shown for running sessions
-        self._stop_btn = ttk.Button(
-            status_frame, text="\U0001F6D1", width=3, command=self._on_stop
+        self._stop_btn = tk.Button(
+            status_frame, text="\U0001F6D1", command=self._on_stop, **btn_kw,
         )
         self._add_tooltip(self._stop_btn, "Stop session")
+
+        # Restart — hidden by default, shown for stopped sessions
+        self._restart_btn = tk.Button(
+            status_frame, text="\U0001F504", command=self._on_restart, **btn_kw,
+        )
+        self._add_tooltip(self._restart_btn, "Restart with fresh plugins")
 
         # Status label last so it fills remaining space and truncates
         self._status_label = tk.Label(
@@ -147,8 +165,10 @@ class ChatPanel(ttk.Frame):
         )
         if running:
             self._stop_btn.pack(side="right", padx=(0, 5), before=self._summary_btn)
+            self._restart_btn.pack_forget()
         else:
             self._stop_btn.pack_forget()
+            self._restart_btn.pack(side="right", padx=(0, 5), before=self._summary_btn)
 
     def set_input_enabled(self, enabled: bool):
         state = "normal" if enabled else "disabled"
@@ -239,6 +259,32 @@ class ChatPanel(ttk.Frame):
         self._text.see("end")
 
     # ── Private ───────────────────────────────────────────────────────────
+
+    def _load_pr_icon(self, btn_kw: dict) -> Optional[tk.PhotoImage]:
+        """Load the PR icon PNG and resize to match emoji button height."""
+        icon_path = Path(__file__).resolve().parent.parent / "assets" / "pr_icon.png"
+        if not icon_path.exists():
+            return None
+        try:
+            from PIL import Image as PILImage, ImageTk
+            # Measure the emoji button height to match
+            self._close_btn.update_idletasks()
+            border = int(btn_kw.get("borderwidth", 1))
+            target = self._close_btn.winfo_reqheight() - 2 * border - 4
+            if target < 8:
+                target = 20
+            pil_img = PILImage.open(icon_path)
+            # Scale preserving aspect ratio
+            w, h = pil_img.size
+            new_w = int(w * target / h)
+            pil_img = pil_img.resize((new_w, target), PILImage.LANCZOS)
+            photo = ImageTk.PhotoImage(pil_img)
+            # Keep a reference to prevent garbage collection
+            self._pr_icon_pil = photo
+            return photo
+        except ImportError:
+            # Fallback to raw PhotoImage if PIL not available
+            return tk.PhotoImage(file=str(icon_path))
 
     def _open_pr(self):
         if self._pr_url:

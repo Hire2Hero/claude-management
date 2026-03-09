@@ -143,7 +143,7 @@ class PRData:
             return PRStatus.CONFLICTS
         if self.has_failing_checks:
             return PRStatus.CI_FAILING
-        if self.unresolved_thread_count > 0 or self.review_decision == "CHANGES_REQUESTED":
+        if self.unresolved_thread_count > 0:
             return PRStatus.CHANGES_REQUESTED
         if self.all_checks_passed and self.review_decision == "APPROVED":
             return PRStatus.APPROVED
@@ -163,8 +163,6 @@ class PRData:
             problems.append("CI Failing")
         if self.unresolved_thread_count > 0:
             problems.append(f"{self.unresolved_thread_count} Unresolved Comment{'s' if self.unresolved_thread_count != 1 else ''}")
-        if self.review_decision == "CHANGES_REQUESTED" and self.unresolved_thread_count == 0:
-            problems.append("Changes Requested")
         return problems
 
     @property

@@ -56,6 +56,20 @@ def _load_plugin_skill(plugin: str, skill: str) -> str | None:
 _PLUGIN_SKILL_RE = re.compile(r"^/([^:\s]+):([^:\s]+)\s*(.*)", re.DOTALL)
 
 
+def _strip_frontmatter(text: str) -> str:
+    """Remove YAML frontmatter (---...---) from skill content.
+
+    The frontmatter is meant for the plugin system, not for the LLM prompt.
+    Including it confuses Claude into trying to load listed tools via ToolSearch.
+    """
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            # Skip past the closing --- and any trailing newline
+            return text[end + 4:].lstrip("\n")
+    return text
+
+
 def expand_skill_command(command: str) -> str:
     """Expand a /plugin:skill command into its SKILL.md content.
 
@@ -72,6 +86,7 @@ def expand_skill_command(command: str) -> str:
         log.warning("Could not load skill %s:%s — sending command as-is", plugin, skill)
         return command
     log.info("Expanded /%s:%s to SKILL.md content", plugin, skill)
+    content = _strip_frontmatter(content)
     return content.replace("$ARGUMENTS", args)
 
 

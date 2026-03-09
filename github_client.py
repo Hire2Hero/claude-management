@@ -216,16 +216,19 @@ class GitHubClient:
             log.error("Failed to get current user: %s", e)
         return ""
 
-    def fetch_team_prs(self, repo: str) -> list[PRData]:
+    def fetch_team_prs(self, repo: str, *, exclude_drafts: bool = False) -> list[PRData]:
         """Fetch all open PRs for a repo (not filtered by author)."""
         try:
+            cmd = [
+                "gh", "pr", "list",
+                "--repo", f"{self.config.org}/{repo}",
+                "--state", "open",
+                "--json", PR_FIELDS,
+            ]
+            if exclude_drafts:
+                cmd.extend(["--search", "draft:false"])
             result = subprocess.run(
-                [
-                    "gh", "pr", "list",
-                    "--repo", f"{self.config.org}/{repo}",
-                    "--state", "open",
-                    "--json", PR_FIELDS,
-                ],
+                cmd,
                 capture_output=True, text=True, timeout=30,
             )
             if result.returncode != 0:
@@ -263,11 +266,14 @@ class GitHubClient:
 
         return prs
 
-    def fetch_all_team_prs(self) -> list[PRData]:
+    def fetch_all_team_prs(self, *, exclude_drafts: bool = False) -> list[PRData]:
         """Fetch all open PRs across all repos (not filtered by author)."""
         all_prs: list[PRData] = []
         with ThreadPoolExecutor(max_workers=4) as pool:
-            futures = {pool.submit(self.fetch_team_prs, repo): repo for repo in self.config.repos}
+            futures = {
+                pool.submit(self.fetch_team_prs, repo, exclude_drafts=exclude_drafts): repo
+                for repo in self.config.repos
+            }
             for future in as_completed(futures):
                 try:
                     all_prs.extend(future.result())
@@ -276,13 +282,12 @@ class GitHubClient:
         return all_prs
 
     def has_user_review(self, repo: str, number: int, current_user: str, head_sha: str) -> bool:
-        """Check if the current user has left a review comment after the latest commit."""
+        """Check if the current user has submitted an approval or change request review after the latest commit."""
         query = (
             f'query {{ repository(owner: "{self.config.org}", name: "{repo}") {{'
             f'  pullRequest(number: {number}) {{'
             f'    commits(last: 1) {{ nodes {{ commit {{ committedDate }} }} }}'
-            f'    comments(last: 50) {{ nodes {{ author {{ login }} createdAt }} }}'
-            f'    reviews(last: 50) {{ nodes {{ author {{ login }} createdAt }} }}'
+            f'    reviews(last: 50) {{ nodes {{ author {{ login }} createdAt state }} }}'
             f'  }}'
             f'}}}}'
         )
@@ -305,13 +310,15 @@ class GitHubClient:
             return False
         latest_commit_time = commits[0].get("commit", {}).get("committedDate", "")
 
-        # Check PR comments and reviews by the current user after latest commit
-        for source in ("comments", "reviews"):
-            for node in pr_data.get(source, {}).get("nodes", []):
-                author = node.get("author", {}).get("login", "")
-                created = node.get("createdAt", "")
-                if author == current_user and created > latest_commit_time:
-                    return True
+        # Check reviews by the current user after latest commit (only approvals/change requests)
+        for node in pr_data.get("reviews", {}).get("nodes", []):
+            author = node.get("author", {}).get("login", "")
+            created = node.get("createdAt", "")
+            state = node.get("state", "")
+            if (author == current_user
+                    and created > latest_commit_time
+                    and state in ("APPROVED", "CHANGES_REQUESTED")):
+                return True
         return False
 
     def list_repos(self, org: str) -> list[str]:

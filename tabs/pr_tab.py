@@ -264,6 +264,13 @@ class PRTab(ttk.Frame):
                 key = f"{pr.repo}#{pr.number}"
                 self._on_watch(pr, key not in self._watched_keys)
             return
+        if col == "#7":
+            # Draft column — remove draft status
+            self._tree.selection_set(item)
+            pr = self._get_selected_pr()
+            if pr and pr.is_draft and self._on_mark_ready:
+                self._on_mark_ready(pr)
+            return
         if col != "#1":  # action column
             return
         self._tree.selection_set(item)
@@ -327,7 +334,8 @@ class PRTab(ttk.Frame):
                 self._tree.configure(cursor="hand2")
             elif col == "#7" and values:
                 if values[6] == self._DRAFT_ICON:
-                    tip = "Draft"
+                    self._tree.configure(cursor="hand2")
+                    tip = "Remove draft status"
 
         if tip:
             self._tooltip.configure(text=tip)
@@ -341,7 +349,7 @@ class PRTab(ttk.Frame):
                                 y=y - self.winfo_toplevel().winfo_rooty())
             return
 
-        if col not in ("#1", "#2", "#6"):
+        if col not in ("#1", "#2", "#6", "#7"):
             self._tree.configure(cursor=self._default_cursor)
         self._tooltip.place_forget()
 

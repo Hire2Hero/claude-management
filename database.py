@@ -6,7 +6,7 @@ import sqlite3
 import threading
 from typing import Optional
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
@@ -65,6 +65,11 @@ CREATE TABLE IF NOT EXISTS session_summaries (
     created_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_summary_session ON session_summaries(session_name);
+
+CREATE TABLE IF NOT EXISTS ui_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 _MIGRATIONS = {
@@ -83,6 +88,12 @@ CREATE TABLE IF NOT EXISTS pr_reviews (
     6: "ALTER TABLE sessions ADD COLUMN last_response_at REAL;",
     7: "ALTER TABLE pr_reviews ADD COLUMN completed INTEGER NOT NULL DEFAULT 1;",
     8: "ALTER TABLE sessions ADD COLUMN session_type TEXT;",
+    9: """\
+CREATE TABLE IF NOT EXISTS ui_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+""",
 }
 
 

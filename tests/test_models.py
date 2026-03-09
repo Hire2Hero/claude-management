@@ -164,10 +164,10 @@ class TestPRIssues:
         assert any("1 Unresolved Comment" in i for i in issues)
         assert not any("Comments" in i for i in issues)
 
-    def test_changes_requested_fallback(self):
-        """Falls back to Changes Requested when no thread count available."""
+    def test_changes_requested_review_decision_ignored(self):
+        """CHANGES_REQUESTED review decision alone does not count as an issue."""
         pr = make_pr(review_decision="CHANGES_REQUESTED")
-        assert "Changes Requested" in pr.issues
+        assert pr.issues == []
 
     def test_threads_take_precedence_over_review_decision(self):
         """unresolved_thread_count is shown instead of review_decision."""
@@ -197,9 +197,10 @@ class TestPRIssues:
         pr = make_pr(checks=[])
         assert pr.is_ready_for_review is True
 
-    def test_is_ready_for_review_false_with_changes_requested(self):
+    def test_is_ready_for_review_true_with_changes_requested(self):
+        """CHANGES_REQUESTED review decision alone does not block readiness."""
         pr = make_pr(checks=[make_check()], review_decision="CHANGES_REQUESTED")
-        assert pr.is_ready_for_review is False
+        assert pr.is_ready_for_review is True
 
     def test_is_ready_for_review_false_with_unresolved_threads(self):
         pr = make_pr(checks=[make_check()], unresolved_thread_count=1)
@@ -225,9 +226,12 @@ class TestPRStatus:
         pr = make_pr(checks=[make_check(conclusion="FAILURE")])
         assert pr.status == PRStatus.CI_FAILING
 
-    def test_status_changes_requested(self):
+    def test_status_changes_requested_only_from_threads(self):
+        """CHANGES_REQUESTED status requires unresolved threads, not just review decision."""
         pr = make_pr(review_decision="CHANGES_REQUESTED")
-        assert pr.status == PRStatus.CHANGES_REQUESTED
+        assert pr.status == PRStatus.PASSING
+        pr2 = make_pr(review_decision="CHANGES_REQUESTED", unresolved_thread_count=1)
+        assert pr2.status == PRStatus.CHANGES_REQUESTED
 
     def test_status_passing(self):
         pr = make_pr(checks=[make_check(conclusion="SUCCESS")])
